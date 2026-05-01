@@ -1,0 +1,494 @@
+openapi: 3.0.3
+info:
+  title: LM FIT CRM API (proposta)
+  version: 0.1.0
+  description: >
+    Contratos sugeridos para lmfit-api. O painel web (lmfit-web) já compõe dados de cliente
+    com pedidos/notas/escalações; estes endpoints consolidam CRM quando implementados.
+
+servers:
+  - url: http://127.0.0.1:4000
+    description: Dev
+
+tags:
+  - name: customers-crm
+  - name: crm-opportunities
+  - name: crm-tasks
+  - name: crm-segments
+  - name: audit
+  - name: public-ecommerce
+  - name: products
+  - name: reports
+  - name: webhooks
+
+paths:
+  /customers/{id}/summary:
+    get:
+      tags: [customers-crm]
+      summary: Visão 360 agregada do cliente
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Blocos agregados + timeline opcional
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  customer: { type: object }
+                  recentOrders: { type: array, items: { type: object } }
+                  recentInvoices: { type: array, items: { type: object } }
+                  timeline:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kind: { type: string, enum: [order, invoice, note, escalation, audit] }
+                        at: { type: string, format: date-time }
+                        title: { type: string }
+                        refId: { type: string }
+
+  /customers/{id}/notes:
+    get:
+      tags: [customers-crm]
+      summary: Notas internas
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    _id: { type: string }
+                    text: { type: string }
+                    createdAt: { type: string, format: date-time }
+                    authorUserId: { type: string }
+    post:
+      tags: [customers-crm]
+      summary: Criar nota interna
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, maxLength: 8000 }
+      responses:
+        "201": { description: Created }
+
+  /crm/opportunities:
+    get:
+      tags: [crm-opportunities]
+      summary: Listar oportunidades (funil)
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50 }
+        - in: query
+          name: stage
+          schema: { type: string }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Opportunity"
+                  total: { type: integer }
+    post:
+      tags: [crm-opportunities]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpportunityCreate"
+      responses:
+        "201": { description: Created }
+
+  /crm/opportunities/{id}:
+    patch:
+      tags: [crm-opportunities]
+      summary: Atualizar estágio / valor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                stage: { type: string, enum: [new, qualified, proposal, won, lost] }
+                value: { type: number }
+                ownerUserId: { type: string }
+      responses:
+        "200": { description: OK }
+
+  /crm/tasks:
+    get:
+      tags: [crm-tasks]
+      summary: Listar tarefas
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Task"
+                  total: { type: integer }
+    post:
+      tags: [crm-tasks]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskCreate"
+      responses:
+        "201": { description: Created }
+
+  /crm/tasks/{id}:
+    patch:
+      tags: [crm-tasks]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                done: { type: boolean }
+                dueAt: { type: string, format: date-time }
+      responses:
+        "200": { description: OK }
+
+  /crm/segments:
+    get:
+      tags: [crm-segments]
+      summary: Segmentos salvos
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    _id: { type: string }
+                    name: { type: string }
+                    filter: { type: object }
+
+  /crm/segments/{id}/export:
+    get:
+      tags: [crm-segments]
+      summary: Exportar segmento (CSV/xlsx)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: format
+          in: query
+          schema: { type: string, enum: [csv, xlsx], default: csv }
+      responses:
+        "200": { description: File stream }
+
+  /audit/logs:
+    get:
+      tags: [audit]
+      summary: Log de auditoria (staff)
+      parameters:
+        - in: query
+          name: entityType
+          schema: { type: string, example: Order }
+        - in: query
+          name: entityId
+          schema: { type: string }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        at: { type: string, format: date-time }
+                        actorUserId: { type: string }
+                        action: { type: string }
+                        payload: { type: object }
+
+  /public/orders:
+    post:
+      tags: [public-ecommerce]
+      summary: Criar pedido público (opcional PIX no mesmo round-trip)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customerId, lines]
+              properties:
+                customerId: { type: string }
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required: [variantId, quantity, unitPrice]
+                    properties:
+                      variantId: { type: string }
+                      quantity: { type: number }
+                      unitPrice: { type: number }
+                payment:
+                  type: object
+                  properties:
+                    method: { type: string, enum: [pix] }
+      responses:
+        "201":
+          description: Pedido criado; com `payment.method=pix` inclui dados PIX
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orderId: { type: string }
+                  warnings: { type: array }
+                  payment:
+                    type: object
+                    properties:
+                      paymentId: { type: string }
+                      qrCode: { type: string }
+                      qrCodeImage: { type: string }
+                      expiresAt: { type: string, format: date-time }
+
+  /public/payments/{id}:
+    get:
+      tags: [public-ecommerce]
+      summary: Status do pagamento (polling)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [pending, paid, expired, failed, cancelled]
+
+  /public/payments/{id}/dev-confirm:
+    post:
+      tags: [public-ecommerce]
+      summary: Confirma PIX em dev (requer header X-Payment-Dev-Confirm = PAYMENT_DEV_CONFIRM_KEY)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Pedido marcado como pago
+
+  /products/bulk:
+    patch:
+      tags: [products]
+      summary: Atualização em lote (preço / estoque em todas as variantes do produto)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids, changes]
+              properties:
+                ids:
+                  type: array
+                  items: { type: string }
+                changes:
+                  type: object
+                  properties:
+                    pricePercent: { type: number }
+                    priceSet: { type: number }
+                    quantityInStockDelta: { type: number }
+                    quantityInStockSet: { type: number }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: array
+                    items: { type: string }
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        error: { type: string }
+
+  /reports/sales-today:
+    get:
+      tags: [reports]
+      summary: Vendas do dia (pedidos pagos/atendidos)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date: { type: string }
+                  total: { type: number }
+                  orderCount: { type: integer }
+                  avgTicket: { type: number }
+
+  /reports/abc:
+    get:
+      tags: [reports]
+      summary: Curva ABC por produto
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  range:
+                    type: object
+                    properties:
+                      from: { type: string }
+                      to: { type: string }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        productId: { type: string }
+                        name: { type: string }
+                        sku: { type: string }
+                        revenue: { type: number }
+                        units: { type: number }
+                        cumulativePercent: { type: number }
+                        curve: { type: string, enum: [A, B, C] }
+
+  /webhooks/payment-events:
+    post:
+      tags: [webhooks]
+      summary: >
+        Contrato outbound: a API POSTa em WEBHOOK_URL eventos `payment.paid`,
+        `payment.expired`, `payment.refunded` com paymentId, orderId, status, amount, paidAt (opcional).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event: { type: string }
+                paymentId: { type: string }
+                orderId: { type: string }
+                status: { type: string }
+                amount: { type: number }
+                paidAt: { type: string, format: date-time }
+
+components:
+  schemas:
+    Opportunity:
+      type: object
+      properties:
+        _id: { type: string }
+        title: { type: string }
+        customerId: { type: string }
+        stage: { type: string }
+        value: { type: number }
+        ownerUserId: { type: string }
+        expectedCloseAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    OpportunityCreate:
+      type: object
+      required: [title, customerId]
+      properties:
+        title: { type: string }
+        customerId: { type: string }
+        value: { type: number }
+        stage: { type: string }
+    Task:
+      type: object
+      properties:
+        _id: { type: string }
+        title: { type: string }
+        customerId: { type: string }
+        dueAt: { type: string, format: date-time }
+        assigneeUserId: { type: string }
+        doneAt: { type: string, format: date-time }
+    TaskCreate:
+      type: object
+      required: [title, dueAt]
+      properties:
+        title: { type: string }
+        dueAt: { type: string, format: date-time }
+        customerId: { type: string }
+        assigneeUserId: { type: string }

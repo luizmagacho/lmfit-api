@@ -1,0 +1,24 @@
+# MongoDB for local development (lmfit-api + lmfit-web + lmfit-mobile)
+# Usage: docker compose up -d
+# URI: mongodb://127.0.0.1:27017/lmfit  (same as .env.example)
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: lmfit-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - lmfit_mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: lmfit
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  lmfit_mongo_data:

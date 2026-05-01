@@ -1,0 +1,59 @@
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument, Schema as MSchema, Types } from 'mongoose';
+
+export type OrderDraftStatus =
+  | 'collecting'
+  | 'review'
+  | 'submitted'
+  | 'assigned';
+
+export type OrderDraftDocument = HydratedDocument<OrderDraft>;
+
+const DraftLineSchema = new MSchema(
+  {
+    variantId: { type: Types.ObjectId, ref: 'ProductVariant', required: true },
+    quantity: { type: Number, required: true, min: 1 },
+    unitPrice: { type: Number, required: true, min: 0 },
+  },
+  { _id: false },
+);
+
+@Schema({ timestamps: true })
+export class OrderDraft {
+  @Prop({ required: true, unique: true, index: true })
+  sessionToken: string;
+
+  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  customerId?: Types.ObjectId;
+
+  @Prop({ trim: true })
+  waId?: string;
+
+  @Prop({
+    type: String,
+    enum: ['collecting', 'review', 'submitted', 'assigned'],
+    default: 'collecting',
+  })
+  status: OrderDraftStatus;
+
+  @Prop({ type: [DraftLineSchema], default: [] })
+  lines: Array<{
+    variantId: Types.ObjectId;
+    quantity: number;
+    unitPrice: number;
+  }>;
+
+  @Prop({ trim: true })
+  paymentMethodChoice?: string;
+
+  @Prop({ type: Types.ObjectId, ref: 'User' })
+  assignedSalesUserId?: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Order' })
+  orderId?: Types.ObjectId;
+
+  @Prop({ type: MSchema.Types.Mixed })
+  metadata?: Record<string, unknown>;
+}
+
+export const OrderDraftSchema = SchemaFactory.createForClass(OrderDraft);

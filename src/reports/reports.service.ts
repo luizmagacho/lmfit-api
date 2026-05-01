@@ -1,0 +1,362 @@
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
+import { Order } from '../orders/schemas/order.schema';
+import { Product } from '../products/schemas/product.schema';
+import { ProductVariant } from '../products/schemas/product-variant.schema';
+import { Purchase } from '../purchases/schemas/purchase.schema';
+
+export type ReportsRange = { from: Date; to: Date };
+
+@Injectable()
+export class ReportsService {
+  constructor(
+    @InjectModel(Order.name) private readonly orderModel: Model<Order>,
+    @InjectModel(Product.name) private readonly productModel: Model<Product>,
+    @InjectModel(ProductVariant.name)
+    private readonly variantModel: Model<ProductVariant>,
+    @InjectModel(Purchase.name) private readonly purchaseModel: Model<Purchase>,
+  ) {}
+
+  private utcDayRange(ref: Date): { from: Date; to: Date } {
+    const from = new Date(
+      Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth(), ref.getUTCDate(), 0, 0, 0, 0),
+    );
+    const to = new Date(from);
+    to.setUTCDate(to.getUTCDate() + 1);
+    to.setUTCMilliseconds(to.getUTCMilliseconds() - 1);
+    return { from, to };
+  }
+
+  /**
+   * GET /reports/purchases-daily
+   * Aggregates purchase orders by UTC calendar day.
+   * Dates are UTC. Each point: { date: "YYYY-MM-DD", purchaseCount, totalAmount }.
+   * Days with zero purchases are included in the output.
+   */
+  async purchasesDaily(range: ReportsRange) {
+    const rows = await this.purchaseModel
+      .aggregate<{ date: string; purchaseCount: number; totalAmount: number }>([
+        { $match: { createdAt: { $gte: range.from, $lte: range.to } } },
+        {
+          $group: {
+            _id: {
+              $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'UTC' },
+            },
+            purchaseCount: { $sum: 1 },
+            totalAmount: { $sum: '$total' },
+          },
+        },
+        { $sort: { _id: 1 } },
+        {
+          $project: {
+            _id: 0,
+            date: '$_id',
+            purchaseCount: 1,
+            totalAmount: { $round: ['$totalAmount', 2] },
+          },
+        },
+      ])
+      .exec();
+
+    // Fill gaps for days with 0 purchases
+    const byDate = new Map(rows.map((r) => [r.date, r]));
+    const points: Array<{ date: string; purchaseCount: number; totalAmount: number }> = [];
+    const cursor = new Date(
+      Date.UTC(
+        range.from.getUTCFullYear(),
+        range.from.getUTCMonth(),
+        range.from.getUTCDate(),
+      ),
+    );
+    const end = new Date(
+      Date.UTC(
+        range.to.getUTCFullYear(),
+        range.to.getUTCMonth(),
+        range.to.getUTCDate(),
+      ),
+    );
+    while (cursor <= end) {
+      const dateStr = cursor.toISOString().slice(0, 10);
+      const hit = byDate.get(dateStr);
+      points.push(hit ?? { date: dateStr, purchaseCount: 0, totalAmount: 0 });
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    return {
+      range: { from: range.from.toISOString(), to: range.to.toISOString() },
+      points,
+    };
+  }
+
+  /**
+   * GET /reports/revenue-by-product
+   * Returns top N products by net line revenue (quantity × unitPrice) from paid/fulfilled orders.
+   * Excludes taxes and shipping. Source: orders.lines.
+   */
+  async revenueByProduct(range: ReportsRange, limit = 10) {
+    const matchPaid = {
+      createdAt: { $gte: range.from, $lte: range.to },
+      status: { $in: ['paid', 'fulfilled'] as const },
+    };
+    const rows = await this.orderModel
+      .aggregate<{ _id: Types.ObjectId; revenue: number; units: number }>([
+        { $match: matchPaid },
+        { $unwind: '$lines' },
+        {
+          $lookup: {
+            from: 'productvariants',
+            localField: 'lines.variantId',
+            foreignField: '_id',
+            as: 'v',
+          },
+        },
+        { $unwind: '$v' },
+        {
+          $group: {
+            _id: '$v.productId',
+            revenue: { $sum: { $multiply: ['$lines.quantity', '$lines.unitPrice'] } },
+            units: { $sum: '$lines.quantity' },
+          },
+        },
+        { $sort: { revenue: -1 } },
+        { $limit: limit },
+      ])
+      .exec();
+
+    const items = await Promise.all(
+      rows.map(async (r) => {
+        const prod = await this.productModel
+          .findById(r._id)
+          .select({ name: 1 })
+          .lean()
+          .exec();
+        const firstVar = await this.variantModel
+          .findOne({ productId: r._id })
+          .sort({ sku: 1 })
+          .select({ sku: 1 })
+          .lean()
+          .exec();
+        return {
+          productId: String(r._id),
+          name: (prod as { name?: string } | null)?.name ?? '(sem nome)',
+          sku: (firstVar as { sku?: string } | null)?.sku ?? '',
+          revenue: Math.round(r.revenue * 100) / 100,
+          units: r.units,
+        };
+      }),
+    );
+
+    return {
+      range: { from: range.from.toISOString(), to: range.to.toISOString() },
+      items,
+    };
+  }
+
+  async salesToday(dateStr?: string) {
+    const ref = dateStr ? new Date(dateStr) : new Date();
+    if (Number.isNaN(ref.getTime())) {
+      throw new BadRequestException('Data inválida');
+    }
+    const { from, to } = this.utcDayRange(ref);
+    const matchPaid = {
+      createdAt: { $gte: from, $lte: to },
+      status: { $in: ['paid', 'fulfilled'] as const },
+    };
+    const [agg] = await this.orderModel
+      .aggregate<{ total: number; count: number }>([
+        { $match: matchPaid },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: '$total' },
+            count: { $sum: 1 },
+          },
+        },
+      ])
+      .exec();
+    const total = agg?.total ?? 0;
+    const orderCount = agg?.count ?? 0;
+    const avgTicket = orderCount > 0 ? Math.round((total / orderCount) * 100) / 100 : 0;
+    return {
+      date: from.toISOString().slice(0, 10),
+      total,
+      orderCount,
+      avgTicket,
+    };
+  }
+
+  async abc(range: ReportsRange) {
+    const matchPaid = {
+      createdAt: { $gte: range.from, $lte: range.to },
+      status: { $in: ['paid', 'fulfilled'] as const },
+    };
+    const rows = await this.orderModel
+      .aggregate<{
+        _id: Types.ObjectId;
+        revenue: number;
+        units: number;
+      }>([
+        { $match: matchPaid },
+        { $unwind: '$lines' },
+        {
+          $lookup: {
+            from: 'productvariants',
+            localField: 'lines.variantId',
+            foreignField: '_id',
+            as: 'v',
+          },
+        },
+        { $unwind: '$v' },
+        {
+          $group: {
+            _id: '$v.productId',
+            revenue: {
+              $sum: {
+                $multiply: ['$lines.quantity', '$lines.unitPrice'],
+              },
+            },
+            units: { $sum: '$lines.quantity' },
+          },
+        },
+        { $sort: { revenue: -1 } },
+      ])
+      .exec();
+
+    const grand = rows.reduce((s, r) => s + r.revenue, 0) || 1;
+    let cumulative = 0;
+    const items: Array<{
+      productId: string;
+      name: string;
+      sku: string;
+      revenue: number;
+      units: number;
+      cumulativePercent: number;
+      curve: 'A' | 'B' | 'C';
+    }> = [];
+    for (const r of rows) {
+      cumulative += r.revenue;
+      const cumulativePercent = Math.round((cumulative / grand) * 1000) / 10;
+      const curve: 'A' | 'B' | 'C' =
+        cumulativePercent <= 80 ? 'A' : cumulativePercent <= 95 ? 'B' : 'C';
+      const prod = await this.productModel
+        .findById(r._id)
+        .select({ name: 1 })
+        .lean()
+        .exec();
+      const firstVar = await this.variantModel
+        .findOne({ productId: r._id })
+        .sort({ sku: 1 })
+        .select({ sku: 1 })
+        .lean()
+        .exec();
+      items.push({
+        productId: String(r._id),
+        name: (prod as { name?: string } | null)?.name ?? '(sem nome)',
+        sku: (firstVar as { sku?: string } | null)?.sku ?? '',
+        revenue: Math.round(r.revenue * 100) / 100,
+        units: r.units,
+        cumulativePercent,
+        curve,
+      });
+    }
+    return {
+      range: { from: range.from.toISOString(), to: range.to.toISOString() },
+      items,
+    };
+  }
+
+  async summary(range: ReportsRange) {
+    const matchPaid = {
+      createdAt: { $gte: range.from, $lte: range.to },
+      status: { $in: ['paid', 'fulfilled'] as const },
+    };
+
+    const [revenueAgg] = await this.orderModel
+      .aggregate<{ total: number; count: number }>([
+        { $match: matchPaid },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: '$total' },
+            count: { $sum: 1 },
+          },
+        },
+      ])
+      .exec();
+
+    const topVariants = await this.orderModel
+      .aggregate<{
+        variantId: Types.ObjectId;
+        units: number;
+        revenue: number;
+      }>([
+        { $match: matchPaid },
+        { $unwind: '$lines' },
+        {
+          $group: {
+            _id: '$lines.variantId',
+            units: { $sum: '$lines.quantity' },
+            revenue: {
+              $sum: {
+                $multiply: ['$lines.quantity', '$lines.unitPrice'],
+              },
+            },
+          },
+        },
+        { $sort: { revenue: -1 } },
+        { $limit: 10 },
+        {
+          $lookup: {
+            from: 'productvariants',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'variant',
+          },
+        },
+        { $unwind: { path: '$variant', preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            _id: 0,
+            variantId: '$_id',
+            sku: '$variant.sku',
+            color: '$variant.color',
+            size: '$variant.size',
+            units: 1,
+            revenue: 1,
+          },
+        },
+      ])
+      .exec();
+
+    const variants = await this.variantModel
+      .find({})
+      .select({ sku: 1, quantityOnHand: 1, price: 1 })
+      .lean()
+      .exec();
+    const stockValue = variants.reduce(
+      (acc, v) => acc + (v.quantityOnHand ?? 0) * (v.price ?? 0),
+      0,
+    );
+
+    const totalRev = revenueAgg?.total ?? 0;
+    const orderCount = revenueAgg?.count ?? 0;
+    const avgTicket =
+      orderCount > 0 ? Math.round((totalRev / orderCount) * 100) / 100 : 0;
+    const st = await this.salesToday();
+    const salesToday = st.total;
+
+    return {
+      range: { from: range.from.toISOString(), to: range.to.toISOString() },
+      revenue: {
+        total: totalRev,
+        orderCount,
+        source: 'orders_paid_or_fulfilled',
+      },
+      avgTicket,
+      salesToday,
+      topVariants,
+      stockValue: { totalRetail: stockValue, note: 'quantityOnHand * variant.price' },
+    };
+  }
+}
