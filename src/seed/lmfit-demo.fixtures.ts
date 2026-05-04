@@ -29,7 +29,7 @@ export type OrderFixture = {
   customerIndex: number;
   reference: string;
   total: number;
-  status: 'draft' | 'paid' | 'fulfilled' | 'cancelled';
+  status: 'open' | 'picking' | 'shipped' | 'completed' | 'cancelled';
   /** Canal de venda (API); default aplicado no seed se omitido */
   channel?: 'in_person' | 'online' | 'site' | 'whatsapp';
   notes?: string;
@@ -115,7 +115,7 @@ export const Orders: OrderFixture[] = [
     customerIndex: 0,
     reference: 'Shorts Liz',
     total: 69,
-    status: 'paid',
+    status: 'completed',
     channel: 'site',
     notes: 'Listagem lançamentos / outlet — valor promocional',
   },
@@ -123,42 +123,42 @@ export const Orders: OrderFixture[] = [
     customerIndex: 1,
     reference: 'Conjunto Alci',
     total: 189,
-    status: 'fulfilled',
+    status: 'completed',
     channel: 'whatsapp',
   },
   {
     customerIndex: 0,
     reference: 'Garrafa HydraFit',
     total: 15,
-    status: 'paid',
+    status: 'completed',
     channel: 'online',
   },
   {
     customerIndex: 2,
     reference: 'Bolsa Sacola Esportiva LMFIT',
     total: 25,
-    status: 'fulfilled',
+    status: 'completed',
     channel: 'in_person',
   },
   {
     customerIndex: 1,
     reference: 'Bermuda Helo',
     total: 59,
-    status: 'draft',
+    status: 'open',
     channel: 'site',
   },
   {
     customerIndex: 2,
     reference: 'Conjunto Flow',
     total: 175,
-    status: 'paid',
+    status: 'completed',
     channel: 'whatsapp',
   },
   {
     customerIndex: 0,
     reference: 'Jaqueta Lyah',
     total: 99,
-    status: 'fulfilled',
+    status: 'completed',
     channel: 'online',
   },
 ];

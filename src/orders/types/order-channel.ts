@@ -3,6 +3,7 @@ export const ORDER_CHANNELS = [
   'online',
   'site',
   'whatsapp',
+  'banca',
 ] as const;
 
 export type OrderChannel = (typeof ORDER_CHANNELS)[number];

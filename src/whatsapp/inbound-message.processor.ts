@@ -166,7 +166,7 @@ export class InboundMessageProcessor {
       }
       const order = await this.orders.create({
         customerId,
-        status: parsed.entities.orderStatus ?? 'draft',
+        status: parsed.entities.orderStatus ?? 'open',
         reference: parsed.entities.reference,
         notes: parsed.entities.notes,
         total: parsed.entities.total,

@@ -24,7 +24,7 @@ import { ORDER_CHANNELS } from './types/order-channel';
 import type { OrderWarning } from './types/order-warning';
 import { PaymentsService } from '../payments/payments.service';
 
-const STOCK_APPLIED_STATUSES = ['paid', 'fulfilled'] as const;
+const STOCK_APPLIED_STATUSES = ['shipped', 'completed'] as const;
 
 function isStockAppliedStatus(s: string): boolean {
   return (STOCK_APPLIED_STATUSES as readonly string[]).includes(s);
@@ -52,13 +52,13 @@ export class OrdersService {
     if (isStockAppliedStatus(status) && (!lines || lines.length === 0)) {
       throw new UnprocessableEntityException({
         message:
-          'Pedido pago ou atendido precisa de pelo menos uma linha com produto (variante).',
+          'Pedido enviado ou concluído precisa de pelo menos uma linha com produto (variante).',
       });
     }
   }
 
   private assertDraftMayHaveEmptyLines(status: string, lines: Order['lines']) {
-    if (status === 'draft' || status === 'cancelled') return;
+    if (status === 'open' || status === 'cancelled') return;
     if (!lines?.length) {
       throw new UnprocessableEntityException({
         message: 'Informe ao menos um item (linha) para este status de pedido.',
@@ -72,11 +72,13 @@ export class OrdersService {
   ) {
     if (
       dto.lines !== undefined &&
-      (currentStatus === 'paid' || currentStatus === 'fulfilled')
+      (currentStatus === 'picking' ||
+        currentStatus === 'shipped' ||
+        currentStatus === 'completed')
     ) {
       throw new UnprocessableEntityException({
         message:
-          'Não é possível alterar itens de pedido já pago ou atendido. Cancele o pedido ou ajuste o estoque manualmente, se aplicável.',
+          'Não é possível alterar itens de pedido em separação, enviado ou concluído. Cancele o pedido ou ajuste o estoque manualmente, se aplicável.',
       });
     }
   }
@@ -211,7 +213,7 @@ export class OrdersService {
   }
 
   async create(dto: CreateOrderDto, createdBy?: string): Promise<OrderResponse> {
-    const status = dto.status ?? 'draft';
+    const status = dto.status ?? 'open';
     const channel = dto.channel ?? 'online';
     const { lines, total: computedTotal } = await this.resolveLines(dto.lines);
 
@@ -231,8 +233,11 @@ export class OrdersService {
       await this.assertStockSufficientForPay(lines);
     }
 
+    const nextNumber = (await this.model.countDocuments().exec()) + 1;
+
     const created = await this.model.create({
       customerId: new Types.ObjectId(dto.customerId),
+      number: nextNumber,
       channel,
       status,
       reference: dto.reference,
@@ -373,8 +378,8 @@ export class OrdersService {
     const st = String(row.status ?? '').trim();
     const status =
       st &&
-      ['draft', 'pending_payment', 'paid', 'fulfilled', 'cancelled'].includes(st)
-        ? (st as 'draft' | 'pending_payment' | 'paid' | 'fulfilled' | 'cancelled')
+      ['open', 'picking', 'shipped', 'completed', 'cancelled'].includes(st)
+        ? (st as 'open' | 'picking' | 'shipped' | 'completed' | 'cancelled')
         : undefined;
     const ch = String(row.channel ?? '').trim();
     const channel =
@@ -592,12 +597,12 @@ export class OrdersService {
     existing.total = total;
     await existing.save();
 
-    if (!wasApplied && willApply && newStatus === 'paid') {
+    if (!wasApplied && willApply && newStatus === 'completed') {
       await this.payments.syncPaymentPaidForOrder(existing._id as Types.ObjectId);
     }
     if (
       newStatus === 'cancelled' &&
-      oldStatus === 'pending_payment' &&
+      oldStatus === 'open' &&
       !wasApplied
     ) {
       await this.payments.cancelPendingForOrder(existing._id as Types.ObjectId);
@@ -613,7 +618,7 @@ export class OrdersService {
         {
           customerId: dto.customerId,
           channel: dto.channel ?? 'online',
-          status: 'pending_payment',
+          status: 'open',
           lines: dto.lines,
           reference: dto.reference,
           notes: dto.notes,
@@ -637,7 +642,7 @@ export class OrdersService {
       {
         customerId: dto.customerId,
         channel: dto.channel ?? 'online',
-        status: 'draft',
+        status: 'open',
         lines: dto.lines,
         reference: dto.reference,
         notes: dto.notes,
@@ -651,7 +656,7 @@ export class OrdersService {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
     const doc = await this.model.findById(id).exec();
     if (!doc) throw new NotFoundException();
-    if (doc.status === 'pending_payment') {
+    if (doc.status === 'open') {
       await this.payments.cancelPendingForOrder(doc._id as Types.ObjectId);
     }
     if (isStockAppliedStatus(doc.status) && (doc.lines?.length ?? 0) > 0) {

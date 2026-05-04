@@ -24,6 +24,7 @@ import { SeedModule } from './seed/seed.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { UsersModule } from './users/users.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
+import { CashflowModule } from './cashflow/cashflow.module';
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
     CatalogModule,
     OrderDraftsModule,
     WhatsappModule,
+    CashflowModule,
   ],
   controllers: [AppController],
   providers: [
