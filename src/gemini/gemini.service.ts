@@ -21,7 +21,7 @@ export type GeminiIntentResult = {
       unitPrice?: number;
     }>;
     total?: number;
-    orderStatus?: 'draft' | 'paid' | 'fulfilled' | 'cancelled';
+    orderStatus?: 'open' | 'picking' | 'shipped' | 'completed' | 'cancelled';
     purchaseStatus?: 'pending' | 'received' | 'cancelled';
   };
 };
