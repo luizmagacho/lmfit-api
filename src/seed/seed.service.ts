@@ -13,13 +13,13 @@ import { Supplier } from '../suppliers/schemas/supplier.schema';
 import { UsersService } from '../users/users.service';
 import {
   DEMO_SEED_SENTINEL_NOTES,
-  demoCustomers,
-  demoInvoices,
-  demoOrders,
-  demoPurchases,
-  demoSuppliers,
-  type DemoPurchaseFixture,
-  type DemoPurchaseLineFixture,
+  Customers as demoCustomers,
+  Invoices as demoInvoices,
+  Orders as demoOrders,
+  Purchases as demoPurchases,
+  Suppliers as demoSuppliers,
+  type PurchaseFixture as DemoPurchaseFixture,
+  type PurchaseLineFixture as DemoPurchaseLineFixture,
 } from './lmfit-demo.fixtures';
 
 @Injectable()

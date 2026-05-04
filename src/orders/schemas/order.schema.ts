@@ -3,10 +3,10 @@ import { HydratedDocument, Schema as MSchema, Types } from 'mongoose';
 import { ORDER_CHANNELS } from '../types/order-channel';
 
 export type OrderStatus =
-  | 'draft'
-  | 'pending_payment'
-  | 'paid'
-  | 'fulfilled'
+  | 'open'
+  | 'picking'
+  | 'shipped'
+  | 'completed'
   | 'cancelled';
 
 export type OrderDocument = HydratedDocument<Order>;
@@ -30,6 +30,9 @@ export class Order {
   @Prop({ type: Types.ObjectId, ref: 'Customer', required: true })
   customerId: Types.ObjectId;
 
+  @Prop({ type: Number, index: true })
+  number: number;
+
   @Prop({
     type: String,
     enum: ORDER_CHANNELS,
@@ -40,8 +43,8 @@ export class Order {
 
   @Prop({
     type: String,
-    enum: ['draft', 'pending_payment', 'paid', 'fulfilled', 'cancelled'],
-    default: 'draft',
+    enum: ['open', 'picking', 'shipped', 'completed', 'cancelled'],
+    default: 'open',
   })
   status: OrderStatus;
 

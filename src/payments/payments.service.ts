@@ -65,7 +65,7 @@ export class PaymentsService {
       throw new BadRequestException('Pagamento não está pendente');
     }
     const orderId = String(p.orderId);
-    await this.orders.update(orderId, { status: 'paid' }, undefined);
+    await this.orders.update(orderId, { status: 'completed' }, undefined);
   }
 
   async markExpiredIfDue(paymentId: string): Promise<void> {

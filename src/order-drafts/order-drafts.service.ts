@@ -173,7 +173,7 @@ export class OrderDraftsService {
         {
           customerId: String(customerId),
           channel: 'online',
-          status: 'pending_payment',
+          status: 'open',
           reference: `draft:${doc.sessionToken}`,
           notes: notesParts.length ? notesParts.join('\n') : undefined,
           lines: lineInputs,
@@ -206,7 +206,7 @@ export class OrderDraftsService {
 
     const order = await this.orders.create({
       customerId: String(customerId),
-      status: 'draft',
+      status: 'open',
       reference: `draft:${doc.sessionToken}`,
       notes: notesParts.length ? notesParts.join('\n') : undefined,
       lines: lineInputs,
