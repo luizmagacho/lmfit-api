@@ -44,14 +44,19 @@ async function bootstrap() {
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean);
+  
+  const allowedOrigins = [
+    webOrigin,
+    ...extraOrigins,
+    /^https?:\/\/localhost(:\d+)?$/,
+    /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+    /\.vercel\.app$/,
+  ];
+
+  console.log('CORS Allowed Origins:', allowedOrigins.filter(o => typeof o === 'string'));
+
   app.enableCors({
-    origin: [
-      webOrigin,
-      ...extraOrigins,
-      /^https?:\/\/localhost(:\d+)?$/,
-      /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
-      /^https?:\/\/lmfit-.*-luizmagachos-projects\.vercel\.app$/,
-    ],
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
