@@ -50,6 +50,7 @@ async function bootstrap() {
       ...extraOrigins,
       /^https?:\/\/localhost(:\d+)?$/,
       /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+      /^https?:\/\/lmfit-.*-luizmagachos-projects\.vercel\.app$/,
     ],
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
