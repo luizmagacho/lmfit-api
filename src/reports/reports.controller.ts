@@ -55,4 +55,23 @@ export class ReportsController {
       q.limit ?? 10,
     );
   }
+
+  /**
+   * DRE Simplificado — Faturamento, Lucro Bruto, Lucro Líquido.
+   * @param taxRate Percentual de imposto (Simples Nacional). Padrão: 6.
+   */
+  @Get('dre')
+  @ApiQuery({ name: 'from', required: true })
+  @ApiQuery({ name: 'to', required: true })
+  @ApiQuery({ name: 'taxRate', required: false, description: 'Percentual de imposto (%). Ex: 6 para Simples Nacional' })
+  dre(
+    @Query() q: ReportsQueryDto,
+    @Query('taxRate') taxRate?: string,
+  ) {
+    const rate = taxRate ? parseFloat(taxRate) : 6;
+    return this.reports.dre(
+      { from: new Date(q.from), to: new Date(q.to) },
+      isNaN(rate) ? 6 : rate,
+    );
+  }
 }

@@ -7,6 +7,7 @@ import {
   ProductVariantSchema,
 } from '../products/schemas/product-variant.schema';
 import { Purchase, PurchaseSchema } from '../purchases/schemas/purchase.schema';
+import { ProductionBatch, ProductionBatchSchema } from '../production/schemas/production-batch.schema';
 import { ReportsController } from './reports.controller';
 import { ReportsService } from './reports.service';
 
@@ -17,6 +18,7 @@ import { ReportsService } from './reports.service';
       { name: Product.name, schema: ProductSchema },
       { name: ProductVariant.name, schema: ProductVariantSchema },
       { name: Purchase.name, schema: PurchaseSchema },
+      { name: ProductionBatch.name, schema: ProductionBatchSchema },
     ]),
   ],
   controllers: [ReportsController],

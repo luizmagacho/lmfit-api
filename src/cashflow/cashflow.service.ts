@@ -7,6 +7,8 @@ import {
   CashflowEntry,
 } from './schemas/cashflow-entry.schema';
 import type { CreateCashflowImportDto } from './dto/create-cashflow-import.dto';
+import type { CreateCashflowEntryDto } from './dto/create-cashflow-entry.dto';
+import type { UpdateCashflowEntryDto } from './dto/update-cashflow-entry.dto';
 import { GeminiService } from '../gemini/gemini.service';
 
 @Injectable()
@@ -55,6 +57,39 @@ export class CashflowService {
     }
 
     return { importBatch: batchId, count: inserted.length };
+  }
+
+  async createEntry(dto: CreateCashflowEntryDto, createdById?: string) {
+    const doc = await this.model.create({
+      date: new Date(dto.date),
+      hour: dto.hour,
+      type: dto.type,
+      name: dto.name,
+      detail: dto.detail,
+      amount: dto.amount,
+      source: 'manual',
+      importBatch: 'manual',
+      createdBy: createdById ? new Types.ObjectId(createdById) : undefined,
+    });
+    return doc;
+  }
+
+  async updateEntry(id: string, dto: UpdateCashflowEntryDto) {
+    const patch: Record<string, unknown> = {};
+    if (dto.date) patch.date = new Date(dto.date);
+    if (dto.hour !== undefined) patch.hour = dto.hour;
+    if (dto.type) patch.type = dto.type;
+    if (dto.name !== undefined) patch.name = dto.name;
+    if (dto.detail !== undefined) patch.detail = dto.detail;
+    if (dto.amount !== undefined) patch.amount = dto.amount;
+
+    const doc = await this.model.findByIdAndUpdate(id, patch, { new: true }).exec();
+    return doc;
+  }
+
+  async removeEntry(id: string) {
+    const doc = await this.model.findByIdAndDelete(id).exec();
+    return { deleted: !!doc };
   }
 
   async findAll(opts: {
