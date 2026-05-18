@@ -8,7 +8,9 @@ import {
 export const SUPPLIER_EXPORT_COLUMNS: ExcelColumnDef[] = [
   { key: '_id', header: '_id' },
   { key: 'name', header: 'Nome' },
-  { key: 'email', header: 'E-mail' },
+  { key: 'city', header: 'Cidade' },
+  { key: 'state', header: 'UF' },
+  { key: 'websiteUrl', header: 'Site' },
   { key: 'phone', header: 'Telefone' },
   { key: 'taxId', header: 'CPF/CNPJ' },
   { key: 'notes', header: 'Observações' },
@@ -19,8 +21,10 @@ export const SUPPLIER_EXPORT_COLUMNS: ExcelColumnDef[] = [
 const PT_MAP = Object.fromEntries(
   [
     ['nome', 'name'],
-    ['e-mail', 'email'],
-    ['email', 'email'],
+    ['cidade', 'city'],
+    ['uf', 'state'],
+    ['estado', 'state'],
+    ['site', 'websiteUrl'],
     ['telefone', 'phone'],
     ['cpf/cnpj', 'taxId'],
     ['observacoes', 'notes'],
@@ -31,7 +35,9 @@ const PT_MAP = Object.fromEntries(
 const SELF = [
   '_id',
   'name',
-  'email',
+  'city',
+  'state',
+  'websiteUrl',
   'phone',
   'taxId',
   'notes',

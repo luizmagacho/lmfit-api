@@ -25,6 +25,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
 import { UsersModule } from './users/users.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { CashflowModule } from './cashflow/cashflow.module';
+import { ProductionModule } from './production/production.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { CashflowModule } from './cashflow/cashflow.module';
     OrderDraftsModule,
     WhatsappModule,
     CashflowModule,
+    ProductionModule,
   ],
   controllers: [AppController],
   providers: [

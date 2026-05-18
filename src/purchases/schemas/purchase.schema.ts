@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Schema as MSchema, Types } from 'mongoose';
 
-export type PurchaseStatus = 'pending' | 'received' | 'cancelled';
+export type PurchaseStatus = 'interest' | 'order_reserved' | 'in_transit' | 'received' | 'cancelled';
 
 export type PurchaseDocument = HydratedDocument<Purchase>;
 
@@ -23,7 +23,7 @@ export class Purchase {
   @Prop({ type: Types.ObjectId, ref: 'Supplier', required: true })
   supplierId: Types.ObjectId;
 
-  @Prop({ type: String, enum: ['pending', 'received', 'cancelled'], default: 'pending' })
+  @Prop({ type: String, enum: ['interest', 'order_reserved', 'in_transit', 'received', 'cancelled'], default: 'interest' })
   status: PurchaseStatus;
 
   @Prop({ trim: true })

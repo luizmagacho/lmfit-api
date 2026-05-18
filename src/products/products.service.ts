@@ -527,10 +527,29 @@ export class ProductsService {
     format: 'xlsx' | 'csv',
     search?: string,
   ): Promise<{ buffer: Buffer; filename: string; mime: string }> {
-    const docs = await this.findAllProductsForExport(search);
-    const rows = docs.map((d) =>
-      this.serializeProductRow(d as unknown as Record<string, unknown>),
-    );
+    const rawDocs = await this.findAllProductsForExport(search);
+    const docs = await this.attachVariantsToProducts(rawDocs as unknown as Record<string, unknown>[]);
+    const rows: Record<string, unknown>[] = [];
+    
+    for (const doc of docs) {
+      const p = this.serializeProductRow(doc);
+      const variants = doc.variants as Record<string, unknown>[];
+      if (variants && variants.length > 0) {
+        for (const v of variants) {
+          rows.push({
+            ...p,
+            sku: v.sku,
+            color: v.color,
+            size: v.size,
+            price: v.price,
+            quantityInStock: v.quantityInStock,
+          });
+        }
+      } else {
+        rows.push(p);
+      }
+    }
+
     const buffer =
       format === 'csv'
         ? this.excel.buildCsvBuffer(PRODUCT_EXPORT_COLUMNS, rows)
@@ -620,36 +639,69 @@ export class ProductsService {
     let updated = 0;
     const skipped = 0;
 
-    for (let i = 0; i < items.length; i++) {
-      const rowNum = i + 1;
+    const grouped = new Map<string, Record<string, unknown>[]>();
+    for (const item of items) {
+       const key = item._id ? String(item._id) : String(item.name ?? '').trim().toLowerCase();
+       if (!key) continue;
+       const list = grouped.get(key) || [];
+       list.push(item);
+       grouped.set(key, list);
+    }
+
+    let groupIndex = 0;
+    for (const [key, rows] of grouped.entries()) {
+      groupIndex++;
       try {
-        const { id, create, patch } = this.parseProductRow(items[i]);
+        const mainRow = rows[0];
+        const { id, create, patch } = this.parseProductRow(mainRow);
+        
+        const variants: ProductVariantUpsertDto[] = [];
+        let vSeq = 0;
+        for (const row of rows) {
+          if (row.sku || row.color || row.size) {
+            variants.push({
+              clientKey: `import-${Date.now()}-${vSeq++}`,
+              sku: String(row.sku ?? '').trim(),
+              color: String(row.color ?? '').trim() || 'Único',
+              size: String(row.size ?? '').trim() || 'Único',
+              price: Number(row.price ?? mainRow.price ?? 0),
+              quantityInStock: Number(row.quantityInStock ?? mainRow.quantityInStock ?? 0),
+            } as any);
+          }
+        }
+
+        if (variants.length > 0) {
+          if (create) create.variants = variants;
+          patch.variants = variants;
+        }
+
         if (dryRun) {
           if (id && Types.ObjectId.isValid(id)) {
             const exists = await this.productModel.findById(id).lean().exec();
             if (!exists) {
               errors.push({
-                row: rowNum,
+                row: groupIndex,
                 message: `_id não encontrado: ${id}`,
               });
             }
           }
           continue;
         }
+
         if (id && Types.ObjectId.isValid(id)) {
           const exists = await this.productModel.findById(id).exec();
           if (!exists) {
-            errors.push({ row: rowNum, message: `_id não encontrado: ${id}` });
+            errors.push({ row: groupIndex, message: `_id não encontrado: ${id}` });
             continue;
           }
-          if (Object.keys(patch).length === 0) {
+          if (Object.keys(patch).length === 0 && (!patch.variants || patch.variants.length === 0)) {
             continue;
           }
           await this.updateProduct(id, patch);
           updated++;
         } else {
           if (!create) {
-            errors.push({ row: rowNum, message: 'Linha inválida' });
+            errors.push({ row: groupIndex, message: 'Linha inválida' });
             continue;
           }
           await this.createProduct(create);
@@ -662,7 +714,7 @@ export class ProductsService {
             : e instanceof Error
               ? e.message
               : 'Erro desconhecido';
-        errors.push({ row: rowNum, message: msg });
+        errors.push({ row: groupIndex, message: msg });
       }
     }
 
@@ -671,12 +723,12 @@ export class ProductsService {
         imported: 0,
         updated: 0,
         skipped: 0,
-        valid: items.length - errors.length,
+        valid: grouped.size - errors.length,
         errors,
         message:
           errors.length === 0
             ? 'Validação concluída sem erros (dryRun).'
-            : `Validação dryRun: ${errors.length} linha(s) com erro.`,
+            : `Validação dryRun: ${errors.length} produto(s) com erro.`,
       };
     }
 

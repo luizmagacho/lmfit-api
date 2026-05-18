@@ -114,7 +114,7 @@ export class InboundMessageProcessor {
       }
       const purchase = await this.purchases.create({
         supplierId,
-        status: parsed.entities.purchaseStatus ?? 'pending',
+        status: (parsed.entities.purchaseStatus as any) ?? 'interest',
         reference: parsed.entities.reference,
         total: parsed.entities.total ?? 0,
         notes: parsed.entities.notes,

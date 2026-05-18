@@ -28,7 +28,7 @@ export class PurchasesService {
     const lines = this.normalizePurchaseLines(dto.lines);
     return this.model.create({
       supplierId: new Types.ObjectId(dto.supplierId),
-      status: dto.status ?? 'pending',
+      status: dto.status ?? 'interest',
       reference: dto.reference,
       total: dto.total ?? 0,
       notes: dto.notes,
@@ -58,7 +58,7 @@ export class PurchasesService {
     if (!variantIds.length) return map;
     const rows = await this.model
       .aggregate<{ _id: Types.ObjectId; qty: number }>([
-        { $match: { status: 'pending' } },
+        { $match: { status: { $in: ['interest', 'order_reserved', 'in_transit'] } } },
         { $unwind: '$lines' },
         { $match: { 'lines.variantId': { $in: variantIds } } },
         {
@@ -181,8 +181,8 @@ export class PurchasesService {
     }
     const st = String(row.status ?? '').trim();
     const status =
-      st && ['pending', 'received', 'cancelled'].includes(st)
-        ? (st as 'pending' | 'received' | 'cancelled')
+      st && ['interest', 'order_reserved', 'in_transit', 'received', 'cancelled'].includes(st)
+        ? (st as 'interest' | 'order_reserved' | 'in_transit' | 'received' | 'cancelled')
         : undefined;
     const lines = this.parseLinesCell(row.lines);
     const patch: UpdatePurchaseDto = {

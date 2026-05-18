@@ -8,8 +8,14 @@ export class Supplier {
   @Prop({ required: true, trim: true })
   name: string;
 
-  @Prop({ trim: true, lowercase: true })
-  email?: string;
+  @Prop({ trim: true })
+  city?: string;
+
+  @Prop({ trim: true, uppercase: true })
+  state?: string;
+
+  @Prop({ trim: true })
+  websiteUrl?: string;
 
   @Prop({ trim: true })
   phone?: string;

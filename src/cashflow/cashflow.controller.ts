@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Post,
+  Patch,
   Query,
   Req,
   UseGuards,
@@ -15,6 +16,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { CreateCashflowImportDto } from './dto/create-cashflow-import.dto';
+import { CreateCashflowEntryDto } from './dto/create-cashflow-entry.dto';
+import { UpdateCashflowEntryDto } from './dto/update-cashflow-entry.dto';
 import { CashflowService } from './cashflow.service';
 
 @ApiTags('cashflow')
@@ -33,6 +36,28 @@ export class CashflowController {
   ) {
     const userId = req.user?.sub;
     return this.cashflow.importBatch(dto, userId);
+  }
+
+  @Post()
+  create(
+    @Body() dto: CreateCashflowEntryDto,
+    @Req() req: Request & { user?: { sub?: string } },
+  ) {
+    const userId = req.user?.sub;
+    return this.cashflow.createEntry(dto, userId);
+  }
+
+  @Patch(':id')
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateCashflowEntryDto,
+  ) {
+    return this.cashflow.updateEntry(id, dto);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.cashflow.removeEntry(id);
   }
 
   /** List transactions */

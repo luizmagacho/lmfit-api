@@ -18,10 +18,10 @@ export class CreatePurchaseDto {
   @IsMongoId()
   supplierId: string;
 
-  @ApiPropertyOptional({ enum: ['pending', 'received', 'cancelled'] })
+  @ApiPropertyOptional({ enum: ['interest', 'order_reserved', 'in_transit', 'received', 'cancelled'] })
   @IsOptional()
-  @IsEnum(['pending', 'received', 'cancelled'])
-  status?: 'pending' | 'received' | 'cancelled';
+  @IsEnum(['interest', 'order_reserved', 'in_transit', 'received', 'cancelled'])
+  status?: 'interest' | 'order_reserved' | 'in_transit' | 'received' | 'cancelled';
 
   @ApiPropertyOptional()
   @IsOptional()

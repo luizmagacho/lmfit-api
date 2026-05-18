@@ -5,6 +5,7 @@ import { Order } from '../orders/schemas/order.schema';
 import { Product } from '../products/schemas/product.schema';
 import { ProductVariant } from '../products/schemas/product-variant.schema';
 import { Purchase } from '../purchases/schemas/purchase.schema';
+import { ProductionBatch } from '../production/schemas/production-batch.schema';
 
 export type ReportsRange = { from: Date; to: Date };
 
@@ -16,6 +17,8 @@ export class ReportsService {
     @InjectModel(ProductVariant.name)
     private readonly variantModel: Model<ProductVariant>,
     @InjectModel(Purchase.name) private readonly purchaseModel: Model<Purchase>,
+    @InjectModel(ProductionBatch.name)
+    private readonly batchModel: Model<ProductionBatch>,
   ) {}
 
   private utcDayRange(ref: Date): { from: Date; to: Date } {
@@ -357,6 +360,131 @@ export class ReportsService {
       salesToday,
       topVariants,
       stockValue: { totalRetail: stockValue, note: 'quantityOnHand * variant.price' },
+    };
+  }
+
+  /**
+   * GET /reports/dre
+   * DRE Simplificado (Demonstrativo de Resultado do Exercício).
+   * Agrega: faturamento (orders), CMV (production batches), despesas (cashflow).
+   */
+  async dre(range: ReportsRange, taxRatePercent = 6) {
+    // ── 1. Faturamento Bruto (orders pagas/entregues) ──────────────────
+    const matchPaid = {
+      createdAt: { $gte: range.from, $lte: range.to },
+      status: { $in: ['paid', 'fulfilled'] as const },
+    };
+    const [revAgg] = await this.orderModel
+      .aggregate<{ total: number; count: number }>([
+        { $match: matchPaid },
+        { $group: { _id: null, total: { $sum: '$total' }, count: { $sum: 1 } } },
+      ])
+      .exec();
+
+    const grossRevenue = revAgg?.total ?? 0;
+    const orderCount = revAgg?.count ?? 0;
+
+    // Devoluções/cancelamentos
+    const [cancAgg] = await this.orderModel
+      .aggregate<{ total: number; count: number }>([
+        {
+          $match: {
+            createdAt: { $gte: range.from, $lte: range.to },
+            status: 'cancelled',
+          },
+        },
+        { $group: { _id: null, total: { $sum: '$total' }, count: { $sum: 1 } } },
+      ])
+      .exec();
+    const returns = cancAgg?.total ?? 0;
+    const netRevenue = grossRevenue - returns;
+
+    // ── 2. CMV — soma dos custos totais dos lotes produzidos no período ──
+    const [batchAgg] = await this.batchModel
+      .aggregate<{ totalBatchCost: number; totalUnits: number; batchCount: number }>([
+        { $match: { createdAt: { $gte: range.from, $lte: range.to } } },
+        {
+          $group: {
+            _id: null,
+            totalBatchCost: { $sum: '$totalBatchCost' },
+            totalUnits: { $sum: '$batchQty' },
+            batchCount: { $sum: 1 },
+          },
+        },
+      ])
+      .exec();
+    const cmv = batchAgg?.totalBatchCost ?? 0;
+    const producedUnits = batchAgg?.totalUnits ?? 0;
+    const batchCount = batchAgg?.batchCount ?? 0;
+    const avgCostPerUnit = producedUnits > 0 ? cmv / producedUnits : 0;
+
+    const grossProfit = netRevenue - cmv;
+    const grossMarginPercent = netRevenue > 0 ? (grossProfit / netRevenue) * 100 : 0;
+
+    // ── 3. Despesas Operacionais (cashflow saídas manuais) ──────────────
+    // Use a try-catch — cashflow collection might not exist
+    let operationalExpenses = 0;
+    let financialFees = 0;
+    try {
+      const db = this.orderModel.db;
+      const cashflow = db.collection('cashflowentries');
+      const [expAgg] = await cashflow
+        .aggregate<{ total: number }>([
+          {
+            $match: {
+              date: { $gte: range.from.toISOString(), $lte: range.to.toISOString() },
+              amount: { $lt: 0 },
+            },
+          },
+          { $group: { _id: null, total: { $sum: { $abs: '$amount' } } } },
+        ])
+        .toArray();
+      const [feeAgg] = await cashflow
+        .aggregate<{ total: number }>([
+          {
+            $match: {
+              date: { $gte: range.from.toISOString(), $lte: range.to.toISOString() },
+              type: { $in: ['pix_sent'] },
+              amount: { $lt: 0 },
+            },
+          },
+          { $group: { _id: null, total: { $sum: { $abs: '$amount' } } } },
+        ])
+        .toArray();
+      operationalExpenses = (expAgg as { total?: number } | undefined)?.total ?? 0;
+      financialFees = (feeAgg as { total?: number } | undefined)?.total ?? 0;
+    } catch {
+      // cashflow not available — values remain 0
+    }
+
+    const ebitda = grossProfit - operationalExpenses;
+    const taxes = (netRevenue * taxRatePercent) / 100;
+    const netProfit = ebitda - taxes;
+    const netMarginPercent = netRevenue > 0 ? (netProfit / netRevenue) * 100 : 0;
+
+    return {
+      range: { from: range.from.toISOString(), to: range.to.toISOString() },
+      taxRatePercent,
+      revenue: {
+        grossRevenue: Math.round(grossRevenue * 100) / 100,
+        returns: Math.round(returns * 100) / 100,
+        netRevenue: Math.round(netRevenue * 100) / 100,
+        orderCount,
+      },
+      cmv: {
+        total: Math.round(cmv * 100) / 100,
+        producedUnits,
+        batchCount,
+        avgCostPerUnit: Math.round(avgCostPerUnit * 100) / 100,
+      },
+      grossProfit: Math.round(grossProfit * 100) / 100,
+      grossMarginPercent: Math.round(grossMarginPercent * 10) / 10,
+      operationalExpenses: Math.round(operationalExpenses * 100) / 100,
+      financialFees: Math.round(financialFees * 100) / 100,
+      ebitda: Math.round(ebitda * 100) / 100,
+      taxes: Math.round(taxes * 100) / 100,
+      netProfit: Math.round(netProfit * 100) / 100,
+      netMarginPercent: Math.round(netMarginPercent * 10) / 10,
     };
   }
 }
