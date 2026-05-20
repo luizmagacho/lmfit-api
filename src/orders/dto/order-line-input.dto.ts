@@ -22,4 +22,10 @@ export class OrderLineInputDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @ApiPropertyOptional({ description: 'Preço/custo de produção unitário' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  productionPrice?: number;
 }

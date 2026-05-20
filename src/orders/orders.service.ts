@@ -105,6 +105,7 @@ export class OrdersService {
         variantId: new Types.ObjectId(line.variantId),
         quantity: line.quantity,
         unitPrice,
+        productionPrice: line.productionPrice || 0,
         description: line.description,
       });
     }
