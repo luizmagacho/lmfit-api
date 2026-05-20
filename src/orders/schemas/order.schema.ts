@@ -20,6 +20,7 @@ const OrderLineSchema = new MSchema(
     },
     quantity: { type: Number, required: true, min: 1 },
     unitPrice: { type: Number, required: true, min: 0 },
+    productionPrice: { type: Number, default: 0 },
     description: { type: String },
   },
   { _id: false },
@@ -62,6 +63,7 @@ export class Order {
     variantId: Types.ObjectId;
     quantity: number;
     unitPrice: number;
+    productionPrice?: number;
     description?: string;
   }>;
 

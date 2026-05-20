@@ -61,6 +61,7 @@ export function isMonetaryResponseKey(
 ): boolean {
   const moneyKeys = new Set([
     'unitPrice',
+    'productionPrice',
     'price',
     'priceRetail',
     'priceWholesale',
