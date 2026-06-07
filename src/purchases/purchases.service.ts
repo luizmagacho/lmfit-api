@@ -24,9 +24,10 @@ export class PurchasesService {
     private readonly excel: ExcelSpreadsheetService,
   ) {}
 
-  async create(dto: CreatePurchaseDto, createdBy?: string) {
+  async create(tenantId: string, dto: CreatePurchaseDto, createdBy?: string) {
     const lines = this.normalizePurchaseLines(dto.lines);
     return this.model.create({
+      tenantId: new Types.ObjectId(tenantId),
       supplierId: new Types.ObjectId(dto.supplierId),
       status: dto.status ?? 'interest',
       reference: dto.reference,
@@ -52,13 +53,19 @@ export class PurchasesService {
    * Quantidade ainda pendente de recebimento por variante (compras status pending).
    */
   async sumPendingOutstandingByVariantIds(
+    tenantId: string,
     variantIds: Types.ObjectId[],
   ): Promise<Map<string, number>> {
     const map = new Map<string, number>();
     if (!variantIds.length) return map;
     const rows = await this.model
       .aggregate<{ _id: Types.ObjectId; qty: number }>([
-        { $match: { status: { $in: ['interest', 'order_reserved', 'in_transit'] } } },
+        {
+          $match: {
+            tenantId: new Types.ObjectId(tenantId),
+            status: { $in: ['interest', 'order_reserved', 'in_transit'] },
+          },
+        },
         { $unwind: '$lines' },
         { $match: { 'lines.variantId': { $in: variantIds } } },
         {
@@ -82,20 +89,22 @@ export class PurchasesService {
     return map;
   }
 
-  private listFilter(search?: string) {
-    return search
-      ? {
-          $or: [
-            { reference: new RegExp(search, 'i') },
-            { notes: new RegExp(search, 'i') },
-          ],
-        }
-      : {};
+  private listFilter(tenantId: string, search?: string) {
+    const filter: Record<string, unknown> = {
+      tenantId: new Types.ObjectId(tenantId),
+    };
+    if (search) {
+      filter.$or = [
+        { reference: new RegExp(search, 'i') },
+        { notes: new RegExp(search, 'i') },
+      ];
+    }
+    return filter;
   }
 
-  async findAll(page: number, limit: number, search?: string) {
+  async findAll(tenantId: string, page: number, limit: number, search?: string) {
     const skip = skipFromPage(page, limit);
-    const q = this.listFilter(search);
+    const q = this.listFilter(tenantId, search);
     const [items, total] = await Promise.all([
       this.model.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       this.model.countDocuments(q).exec(),
@@ -103,8 +112,8 @@ export class PurchasesService {
     return { items, total, page, limit };
   }
 
-  async findAllForExport(search?: string) {
-    const q = this.listFilter(search);
+  async findAllForExport(tenantId: string, search?: string) {
+    const q = this.listFilter(tenantId, search);
     return this.model.find(q).sort({ createdAt: -1 }).lean().exec();
   }
 
@@ -122,10 +131,11 @@ export class PurchasesService {
   }
 
   async exportBuffer(
+    tenantId: string,
     format: 'xlsx' | 'csv',
     search?: string,
   ): Promise<{ buffer: Buffer; filename: string; mime: string }> {
-    const docs = await this.findAllForExport(search);
+    const docs = await this.findAllForExport(tenantId, search);
     const rows = docs.map((d) =>
       this.serializeRow(d as unknown as Record<string, unknown>),
     );
@@ -212,14 +222,16 @@ export class PurchasesService {
   }
 
   async importFromJson(
+    tenantId: string,
     items: Record<string, unknown>[],
     dryRun: boolean,
     createdBy?: string,
   ): Promise<StaffImportResponse> {
-    return this.importRecords(items, dryRun, createdBy);
+    return this.importRecords(tenantId, items, dryRun, createdBy);
   }
 
   async importFromXlsx(
+    tenantId: string,
     buffer: Buffer,
     dryRun: boolean,
     createdBy?: string,
@@ -228,10 +240,11 @@ export class PurchasesService {
       buffer,
       purchaseImportHeaderAliases(),
     );
-    return this.importRecords(records, dryRun, createdBy);
+    return this.importRecords(tenantId, records, dryRun, createdBy);
   }
 
   private async importRecords(
+    tenantId: string,
     items: Record<string, unknown>[],
     dryRun: boolean,
     createdBy?: string,
@@ -247,7 +260,10 @@ export class PurchasesService {
         const { id, create, patch } = this.parseRow(items[i]);
         if (dryRun) {
           if (id && Types.ObjectId.isValid(id)) {
-            const exists = await this.model.findById(id).lean().exec();
+            const exists = await this.model
+              .findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) })
+              .lean()
+              .exec();
             if (!exists) {
               errors.push({
                 row: rowNum,
@@ -258,12 +274,16 @@ export class PurchasesService {
           continue;
         }
         if (id && Types.ObjectId.isValid(id)) {
-          const exists = await this.model.findById(id).exec();
+          const exists = await this.model.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).exec();
           if (!exists) {
             errors.push({ row: rowNum, message: `_id não encontrado: ${id}` });
             continue;
           }
-          await this.model.findByIdAndUpdate(id, patch, { new: true }).exec();
+          await this.model.findOneAndUpdate(
+            { _id: id, tenantId: new Types.ObjectId(tenantId) },
+            patch,
+            { new: true }
+          ).exec();
           updated++;
         } else {
           if (!create) {
@@ -273,7 +293,7 @@ export class PurchasesService {
             });
             continue;
           }
-          await this.create(create, createdBy);
+          await this.create(tenantId, create, createdBy);
           imported++;
         }
       } catch (e) {
@@ -313,14 +333,14 @@ export class PurchasesService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(tenantId: string, id: string) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
-    const doc = await this.model.findById(id).lean().exec();
+    const doc = await this.model.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).lean().exec();
     if (!doc) throw new NotFoundException();
     return doc;
   }
 
-  async update(id: string, dto: UpdatePurchaseDto) {
+  async update(tenantId: string, id: string, dto: UpdatePurchaseDto) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
     const payload: Record<string, unknown> = {};
     if (dto.status !== undefined) payload.status = dto.status;
@@ -331,16 +351,16 @@ export class PurchasesService {
       payload.lines = this.normalizePurchaseLines(dto.lines);
     }
     const doc = await this.model
-      .findByIdAndUpdate(id, payload, { new: true })
+      .findOneAndUpdate({ _id: id, tenantId: new Types.ObjectId(tenantId) }, payload, { new: true })
       .lean()
       .exec();
     if (!doc) throw new NotFoundException();
     return doc;
   }
 
-  async remove(id: string) {
+  async remove(tenantId: string, id: string) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
-    const res = await this.model.findByIdAndDelete(id).exec();
+    const res = await this.model.findOneAndDelete({ _id: id, tenantId: new Types.ObjectId(tenantId) }).exec();
     if (!res) throw new NotFoundException();
     return { deleted: true };
   }

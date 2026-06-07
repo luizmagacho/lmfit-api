@@ -101,6 +101,7 @@ export class InboundMessageProcessor {
       let supplierId = parsed.entities.supplierId;
       if (!supplierId && parsed.entities.supplierHint) {
         const s = await this.suppliers.findFirstByHint(
+          doc.tenantId.toString(),
           parsed.entities.supplierHint,
         );
         supplierId = s?._id ? String(s._id) : undefined;
@@ -112,7 +113,7 @@ export class InboundMessageProcessor {
         });
         return;
       }
-      const purchase = await this.purchases.create({
+      const purchase = await this.purchases.create(doc.tenantId.toString(), {
         supplierId,
         status: (parsed.entities.purchaseStatus as any) ?? 'interest',
         reference: parsed.entities.reference,
@@ -137,11 +138,12 @@ export class InboundMessageProcessor {
       let customerId = parsed.entities.customerId;
       if (!customerId && parsed.entities.customerHint) {
         const c = await this.customers.findFirstByHint(
+          doc.tenantId.toString(),
           parsed.entities.customerHint,
         );
         customerId = c?._id ? String(c._id) : undefined;
       }
-      const waCustomer = await this.customers.findByWaId(from);
+      const waCustomer = await this.customers.findByWaId(doc.tenantId.toString(), from);
       if (!customerId && waCustomer?._id) {
         customerId = String(waCustomer._id);
       }
@@ -164,7 +166,7 @@ export class InboundMessageProcessor {
           }
         }
       }
-      const order = await this.orders.create({
+      const order = await this.orders.create(doc.tenantId.toString(), {
         customerId,
         status: parsed.entities.orderStatus ?? 'open',
         reference: parsed.entities.reference,

@@ -7,6 +7,9 @@ export type PaymentDocument = HydratedDocument<Payment>;
 
 @Schema({ timestamps: true })
 export class Payment {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   @Prop({ type: Types.ObjectId, ref: 'Order', required: true, index: true })
   orderId: Types.ObjectId;
 

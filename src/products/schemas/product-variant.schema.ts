@@ -6,10 +6,13 @@ export type ProductVariantDocument = HydratedDocument<ProductVariant>;
 
 @Schema({ timestamps: true })
 export class ProductVariant {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   @Prop({ type: Types.ObjectId, ref: 'Product', required: true, index: true })
   productId: Types.ObjectId;
 
-  @Prop({ required: true, unique: true, trim: true })
+  @Prop({ required: true, trim: true })
   sku: string;
 
   @Prop({ trim: true })
@@ -47,5 +50,5 @@ export class ProductVariant {
 }
 
 export const ProductVariantSchema = SchemaFactory.createForClass(ProductVariant);
-ProductVariantSchema.index({ sku: 1 }, { unique: true });
+ProductVariantSchema.index({ tenantId: 1, sku: 1 }, { unique: true });
 ProductVariantSchema.index({ productId: 1 });

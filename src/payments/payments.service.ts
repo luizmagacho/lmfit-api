@@ -25,7 +25,7 @@ export class PaymentsService {
     private readonly webhooks: PaymentWebhookDispatcherService,
   ) {}
 
-  async createPixPayment(orderId: string, amount: number): Promise<PaymentDocument> {
+  async createPixPayment(tenantId: string, orderId: string, amount: number): Promise<PaymentDocument> {
     if (!Types.ObjectId.isValid(orderId)) {
       throw new BadRequestException('orderId inválido');
     }
@@ -38,6 +38,7 @@ export class PaymentsService {
     const qrCodeImage = this.config.get<string>('PIX_DEV_QR_IMAGE');
 
     const doc = await this.paymentModel.create({
+      tenantId: new Types.ObjectId(tenantId),
       orderId: new Types.ObjectId(orderId),
       status: 'pending',
       method: 'pix',
@@ -65,7 +66,7 @@ export class PaymentsService {
       throw new BadRequestException('Pagamento não está pendente');
     }
     const orderId = String(p.orderId);
-    await this.orders.update(orderId, { status: 'completed' }, undefined);
+    await this.orders.update(p.tenantId.toString(), orderId, { status: 'completed' }, undefined);
   }
 
   async markExpiredIfDue(paymentId: string): Promise<void> {
@@ -82,15 +83,15 @@ export class PaymentsService {
     });
   }
 
-  async syncPaymentPaidForOrder(orderId: Types.ObjectId): Promise<void> {
+  async syncPaymentPaidForOrder(tenantId: string, orderId: Types.ObjectId): Promise<void> {
     await this.paymentModel
       .updateMany(
-        { orderId, status: 'pending' },
+        { tenantId: new Types.ObjectId(tenantId), orderId, status: 'pending' },
         { $set: { status: 'paid', paidAt: new Date() } },
       )
       .exec();
     const one = await this.paymentModel
-      .findOne({ orderId, status: 'paid' })
+      .findOne({ tenantId: new Types.ObjectId(tenantId), orderId, status: 'paid' })
       .sort({ updatedAt: -1 })
       .lean()
       .exec();
@@ -105,14 +106,14 @@ export class PaymentsService {
     }
   }
 
-  async cancelPendingForOrder(orderId: Types.ObjectId): Promise<void> {
+  async cancelPendingForOrder(tenantId: string, orderId: Types.ObjectId): Promise<void> {
     const pending = await this.paymentModel
-      .find({ orderId, status: 'pending' })
+      .find({ tenantId: new Types.ObjectId(tenantId), orderId, status: 'pending' })
       .lean()
       .exec();
     if (!pending.length) return;
     await this.paymentModel
-      .updateMany({ orderId, status: 'pending' }, { $set: { status: 'cancelled' } })
+      .updateMany({ tenantId: new Types.ObjectId(tenantId), orderId, status: 'pending' }, { $set: { status: 'cancelled' } })
       .exec();
     for (const pay of pending) {
       await this.webhooks.dispatchPaymentEvent('payment.refunded', {
@@ -122,5 +123,41 @@ export class PaymentsService {
         amount: pay.amount,
       });
     }
+  }
+
+  // Admin / Staff CRUD operations
+  async findAll(tenantId: string, page: number, limit: number) {
+    const skip = (page - 1) * limit;
+    const filter = { tenantId: new Types.ObjectId(tenantId) };
+    const [items, total] = await Promise.all([
+      this.paymentModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean()
+        .exec(),
+      this.paymentModel.countDocuments(filter).exec(),
+    ]);
+    return { items, total, page, limit };
+  }
+
+  async findOne(tenantId: string, id: string) {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
+    const doc = await this.paymentModel
+      .findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) })
+      .lean()
+      .exec();
+    if (!doc) throw new NotFoundException();
+    return doc;
+  }
+
+  async remove(tenantId: string, id: string) {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
+    const res = await this.paymentModel
+      .findOneAndDelete({ _id: id, tenantId: new Types.ObjectId(tenantId) })
+      .exec();
+    if (!res) throw new NotFoundException();
+    return { deleted: true };
   }
 }

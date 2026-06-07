@@ -23,27 +23,28 @@ export class SuppliersService {
     private readonly excel: ExcelSpreadsheetService,
   ) {}
 
-  async create(dto: CreateSupplierDto, createdBy?: string) {
+  async create(tenantId: string, dto: CreateSupplierDto, createdBy?: string) {
     return this.model.create({
       ...dto,
+      tenantId: new Types.ObjectId(tenantId),
       createdBy: createdBy ? new Types.ObjectId(createdBy) : undefined,
     });
   }
 
-  private listFilter(search?: string) {
-    return search
-      ? {
-          $or: [
-            { name: new RegExp(search, 'i') },
-            { email: new RegExp(search, 'i') },
-          ],
-        }
-      : {};
+  private listFilter(tenantId: string, search?: string) {
+    const base: Record<string, any> = { tenantId: new Types.ObjectId(tenantId) };
+    if (search) {
+      base.$or = [
+        { name: new RegExp(search, 'i') },
+        { email: new RegExp(search, 'i') },
+      ];
+    }
+    return base;
   }
 
-  async findAll(page: number, limit: number, search?: string) {
+  async findAll(tenantId: string, page: number, limit: number, search?: string) {
     const skip = skipFromPage(page, limit);
-    const q = this.listFilter(search);
+    const q = this.listFilter(tenantId, search);
     const [items, total] = await Promise.all([
       this.model.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       this.model.countDocuments(q).exec(),
@@ -51,8 +52,8 @@ export class SuppliersService {
     return { items, total, page, limit };
   }
 
-  async findAllForExport(search?: string) {
-    const q = this.listFilter(search);
+  async findAllForExport(tenantId: string, search?: string) {
+    const q = this.listFilter(tenantId, search);
     return this.model.find(q).sort({ createdAt: -1 }).lean().exec();
   }
 
@@ -66,10 +67,11 @@ export class SuppliersService {
   }
 
   async exportBuffer(
+    tenantId: string,
     format: 'xlsx' | 'csv',
     search?: string,
   ): Promise<{ buffer: Buffer; filename: string; mime: string }> {
-    const docs = await this.findAllForExport(search);
+    const docs = await this.findAllForExport(tenantId, search);
     const rows = docs.map((d) =>
       this.serializeRow(d as unknown as Record<string, unknown>),
     );
@@ -117,14 +119,16 @@ export class SuppliersService {
   }
 
   async importFromJson(
+    tenantId: string,
     items: Record<string, unknown>[],
     dryRun: boolean,
     createdBy?: string,
   ): Promise<StaffImportResponse> {
-    return this.importRecords(items, dryRun, createdBy);
+    return this.importRecords(tenantId, items, dryRun, createdBy);
   }
 
   async importFromXlsx(
+    tenantId: string,
     buffer: Buffer,
     dryRun: boolean,
     createdBy?: string,
@@ -133,10 +137,11 @@ export class SuppliersService {
       buffer,
       supplierImportHeaderAliases(),
     );
-    return this.importRecords(records, dryRun, createdBy);
+    return this.importRecords(tenantId, records, dryRun, createdBy);
   }
 
   private async importRecords(
+    tenantId: string,
     items: Record<string, unknown>[],
     dryRun: boolean,
     createdBy?: string,
@@ -152,7 +157,10 @@ export class SuppliersService {
         const { id, create, patch } = this.parseRow(items[i]);
         if (dryRun) {
           if (id && Types.ObjectId.isValid(id)) {
-            const exists = await this.model.findById(id).lean().exec();
+            const exists = await this.model
+              .findOne({ _id: new Types.ObjectId(id), tenantId: new Types.ObjectId(tenantId) })
+              .lean()
+              .exec();
             if (!exists) {
               errors.push({
                 row: rowNum,
@@ -163,15 +171,23 @@ export class SuppliersService {
           continue;
         }
         if (id && Types.ObjectId.isValid(id)) {
-          const exists = await this.model.findById(id).exec();
+          const exists = await this.model
+            .findOne({ _id: new Types.ObjectId(id), tenantId: new Types.ObjectId(tenantId) })
+            .exec();
           if (!exists) {
             errors.push({ row: rowNum, message: `_id não encontrado: ${id}` });
             continue;
           }
-          await this.model.findByIdAndUpdate(id, patch, { new: true }).exec();
+          await this.model
+            .findOneAndUpdate(
+              { _id: new Types.ObjectId(id), tenantId: new Types.ObjectId(tenantId) },
+              patch,
+              { new: true },
+            )
+            .exec();
           updated++;
         } else {
-          await this.create(create, createdBy);
+          await this.create(tenantId, create, createdBy);
           imported++;
         }
       } catch (e) {
@@ -211,39 +227,49 @@ export class SuppliersService {
     };
   }
 
-  async findFirstByHint(hint: string) {
+  async findFirstByHint(tenantId: string, hint: string) {
     const h = hint?.trim();
     if (!h) return null;
     const esc = h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp(esc, 'i');
     return this.model
       .findOne({
+        tenantId: new Types.ObjectId(tenantId),
         $or: [{ name: re }, { email: re }],
       })
       .lean()
       .exec();
   }
 
-  async findOne(id: string) {
-    if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
-    const doc = await this.model.findById(id).lean().exec();
-    if (!doc) throw new NotFoundException();
-    return doc;
-  }
-
-  async update(id: string, dto: UpdateSupplierDto) {
+  async findOne(tenantId: string, id: string) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
     const doc = await this.model
-      .findByIdAndUpdate(id, dto, { new: true })
+      .findOne({ _id: new Types.ObjectId(id), tenantId: new Types.ObjectId(tenantId) })
       .lean()
       .exec();
     if (!doc) throw new NotFoundException();
     return doc;
   }
 
-  async remove(id: string) {
+  async update(tenantId: string, id: string, dto: UpdateSupplierDto) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
-    const res = await this.model.findByIdAndDelete(id).exec();
+    const doc = await this.model
+      .findOneAndUpdate(
+        { _id: new Types.ObjectId(id), tenantId: new Types.ObjectId(tenantId) },
+        dto,
+        { new: true },
+      )
+      .lean()
+      .exec();
+    if (!doc) throw new NotFoundException();
+    return doc;
+  }
+
+  async remove(tenantId: string, id: string) {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
+    const res = await this.model
+      .findOneAndDelete({ _id: new Types.ObjectId(id), tenantId: new Types.ObjectId(tenantId) })
+      .exec();
     if (!res) throw new NotFoundException();
     return { deleted: true };
   }

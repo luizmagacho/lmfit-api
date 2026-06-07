@@ -5,6 +5,9 @@ export type RefreshTokenDocument = HydratedDocument<RefreshToken>;
 
 @Schema({ timestamps: true })
 export class RefreshToken {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   userId: Types.ObjectId;
 

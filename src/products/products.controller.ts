@@ -31,6 +31,7 @@ import { ProductsBulkPatchDto } from './dto/products-bulk-patch.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductsService } from './products.service';
 import { productImageUploadOptions } from './upload.config';
+import { TenantId } from '../common/decorators/tenant-id.decorator';
 
 @ApiTags('products')
 @ApiBearerAuth()
@@ -41,8 +42,11 @@ export class ProductsController {
   constructor(private readonly products: ProductsService) {}
 
   @Post()
-  create(@Body() dto: CreateProductDto) {
-    return this.products.createProduct(dto);
+  create(
+    @Body() dto: CreateProductDto,
+    @TenantId() tenantId: string,
+  ) {
+    return this.products.createProduct(tenantId, dto);
   }
 
   /**
@@ -76,17 +80,25 @@ export class ProductsController {
   }
 
   @Get()
-  list(@Query() q: PaginationQueryDto) {
-    return this.products.listProducts(q.page, q.limit, q.search);
+  list(
+    @Query() q: PaginationQueryDto,
+    @TenantId() tenantId: string,
+  ) {
+    return this.products.listProducts(tenantId, q.page, q.limit, q.search);
   }
 
   @Get('export')
-  async export(@Query('format') format?: string, @Query('search') search?: string) {
+  async export(
+    @TenantId() tenantId: string,
+    @Query('format') format?: string,
+    @Query('search') search?: string,
+  ) {
     const fmt = (format ?? 'xlsx').toLowerCase();
     if (fmt !== 'xlsx' && fmt !== 'csv') {
       throw new BadRequestException({ message: 'format must be xlsx or csv' });
     }
     const { buffer, filename, mime } = await this.products.exportProductsBuffer(
+      tenantId,
       fmt as 'xlsx' | 'csv',
       search,
     );
@@ -103,6 +115,7 @@ export class ProductsController {
   )
   async importStaff(
     @Req() req: Request,
+    @TenantId() tenantId: string,
     @Body() body: ImportJsonDto | Record<string, never>,
     @UploadedFile() file: { buffer: Buffer } | undefined,
     @Query('dryRun') dryRunQ?: string,
@@ -116,10 +129,10 @@ export class ProductsController {
           message: 'JSON body must include items[]',
         });
       }
-      return this.products.importProductsFromJson(b.items, b.dryRun ?? dryRun);
+      return this.products.importProductsFromJson(tenantId, b.items, b.dryRun ?? dryRun);
     }
     if (file?.buffer?.length) {
-      return this.products.importProductsFromXlsx(file.buffer, dryRun);
+      return this.products.importProductsFromXlsx(tenantId, file.buffer, dryRun);
     }
     throw new BadRequestException({
       message:
@@ -128,30 +141,44 @@ export class ProductsController {
   }
 
   @Patch('bulk')
-  bulkPatch(@Body() dto: ProductsBulkPatchDto) {
-    return this.products.bulkPatch(dto);
+  bulkPatch(
+    @Body() dto: ProductsBulkPatchDto,
+    @TenantId() tenantId: string,
+  ) {
+    return this.products.bulkPatch(tenantId, dto);
   }
 
   @Get(':id')
-  getOne(@Param('id') id: string) {
-    return this.products.getProduct(id);
+  getOne(
+    @Param('id') id: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.products.getProduct(tenantId, id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
-    return this.products.updateProduct(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateProductDto,
+    @TenantId() tenantId: string,
+  ) {
+    return this.products.updateProduct(tenantId, id, dto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.products.removeProduct(id);
+  remove(
+    @Param('id') id: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.products.removeProduct(tenantId, id);
   }
 
   @Post(':productId/variants')
   createVariant(
     @Param('productId') productId: string,
     @Body() dto: CreateVariantDto,
+    @TenantId() tenantId: string,
   ) {
-    return this.products.createVariant(productId, dto);
+    return this.products.createVariant(tenantId, productId, dto);
   }
 }

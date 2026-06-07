@@ -46,7 +46,7 @@ export class SeedService implements OnModuleInit {
       this.config.get<string>('SEED_ADMIN_PASSWORD') ?? 'ChangeMe123!';
     await this.users.seedAdminIfEmpty(email, password, 'Administrator');
     await this.users.migrateLegacyRoles();
-    const count = await this.users.count();
+    const count = await this.users.count(undefined);
     if (count === 1) {
       this.log.log(
         `Seeded admin user ${email} (change password in production).`,
@@ -71,17 +71,23 @@ export class SeedService implements OnModuleInit {
 
   private async seedLmfitDemo(adminEmail: string): Promise<void> {
     /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- demo insertMany */
-    const admin = await this.users.findByEmail(adminEmail);
+    const admin = await this.users.findByEmail(undefined, adminEmail);
     const createdBy = admin?._id ? new Types.ObjectId(admin._id) : undefined;
     const createdByStr = createdBy?.toString();
+    const tenantId = admin?.tenantId;
+
+    if (!tenantId) {
+      this.log.warn('Could not resolve seed tenantId. Skipping demo data seed.');
+      return;
+    }
 
     const suppliers = await this.supplierModel.insertMany(
-      demoSuppliers.map((s) => ({ ...s, createdBy })),
+      demoSuppliers.map((s) => ({ ...s, createdBy, tenantId })),
     );
     const supplierIds = suppliers.map((d) => d._id);
 
     const customers = await this.customerModel.insertMany(
-      demoCustomers.map((c) => ({ ...c, createdBy })),
+      demoCustomers.map((c) => ({ ...c, createdBy, tenantId })),
     );
     const customerIds = customers.map((d) => d._id);
 
@@ -89,6 +95,7 @@ export class SeedService implements OnModuleInit {
       name: 'Catálogo LMFIT Principal',
       slug: 'lmfit-catalogo-seed',
       active: true,
+      tenantId,
     });
     const variant = await this.variantModel.create({
       productId: product._id,
@@ -96,6 +103,7 @@ export class SeedService implements OnModuleInit {
       price: 1,
       quantityOnHand: 100_000,
       reorderPoint: 0,
+      tenantId,
     });
     const variantIdStr = String(variant._id);
 
@@ -116,6 +124,7 @@ export class SeedService implements OnModuleInit {
         ],
       };
       const created: OrderResponse = await this.orders.create(
+        tenantId.toString(),
         orderPayload,
         createdByStr,
       );
@@ -145,6 +154,7 @@ export class SeedService implements OnModuleInit {
         notes: p.notes,
         lines,
         createdBy,
+        tenantId,
       };
     });
     const purchases = await this.purchaseModel.insertMany(purchaseRows);
@@ -166,6 +176,7 @@ export class SeedService implements OnModuleInit {
             ? purchaseIds[inv.purchaseIndex]
             : undefined,
         createdBy,
+        tenantId,
       })),
     );
 

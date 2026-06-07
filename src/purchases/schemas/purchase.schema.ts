@@ -20,6 +20,9 @@ const PurchaseLineSchema = new MSchema(
 
 @Schema({ timestamps: true })
 export class Purchase {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   @Prop({ type: Types.ObjectId, ref: 'Supplier', required: true })
   supplierId: Types.ObjectId;
 

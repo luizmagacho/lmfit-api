@@ -20,6 +20,9 @@ const DraftLineSchema = new MSchema(
 
 @Schema({ timestamps: true })
 export class OrderDraft {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   @Prop({ required: true, unique: true, index: true })
   sessionToken: string;
 

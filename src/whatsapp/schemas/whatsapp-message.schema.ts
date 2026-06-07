@@ -12,6 +12,9 @@ export type WhatsAppMessageDocument = HydratedDocument<WhatsAppMessage>;
 
 @Schema({ timestamps: true })
 export class WhatsAppMessage {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   @Prop({ required: true, unique: true, index: true })
   wamid: string;
 

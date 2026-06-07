@@ -28,6 +28,9 @@ const OrderLineSchema = new MSchema(
 
 @Schema({ timestamps: true })
 export class Order {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   @Prop({ type: Types.ObjectId, ref: 'Customer', required: true })
   customerId: Types.ObjectId;
 

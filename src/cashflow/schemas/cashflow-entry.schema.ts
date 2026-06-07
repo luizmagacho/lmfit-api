@@ -19,6 +19,9 @@ export type AiAnalysis = {
 
 @Schema({ timestamps: true })
 export class CashflowEntry {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   @Prop({ required: true })
   date: Date;
 

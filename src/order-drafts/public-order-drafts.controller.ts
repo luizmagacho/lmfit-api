@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { TenantId } from '../common/decorators/tenant-id.decorator';
 import {
   PublicCreateDraftDto,
   PublicPatchDraftDto,
@@ -13,22 +14,30 @@ export class PublicOrderDraftsController {
   constructor(private readonly drafts: OrderDraftsService) {}
 
   @Post()
-  create(@Body() dto: PublicCreateDraftDto) {
-    return this.drafts.createPublic(dto);
+  create(@TenantId() tenantId: string, @Body() dto: PublicCreateDraftDto) {
+    return this.drafts.createPublic(tenantId, dto);
   }
 
   @Get(':token')
-  get(@Param('token') token: string) {
-    return this.drafts.getByToken(token);
+  get(@TenantId() tenantId: string, @Param('token') token: string) {
+    return this.drafts.getByToken(tenantId, token);
   }
 
   @Patch(':token')
-  patch(@Param('token') token: string, @Body() dto: PublicPatchDraftDto) {
-    return this.drafts.patchByToken(token, dto);
+  patch(
+    @TenantId() tenantId: string,
+    @Param('token') token: string,
+    @Body() dto: PublicPatchDraftDto,
+  ) {
+    return this.drafts.patchByToken(tenantId, token, dto);
   }
 
   @Post(':token/submit')
-  submit(@Param('token') token: string, @Body() body: PublicSubmitDraftDto) {
-    return this.drafts.submitByToken(token, body);
+  submit(
+    @TenantId() tenantId: string,
+    @Param('token') token: string,
+    @Body() body: PublicSubmitDraftDto,
+  ) {
+    return this.drafts.submitByToken(tenantId, token, body);
   }
 }

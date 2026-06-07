@@ -5,13 +5,14 @@ import { PaymentWebhookDispatcherService } from './payment-webhook-dispatcher.se
 import { PaymentsService } from './payments.service';
 import { Payment, PaymentSchema } from './schemas/payment.schema';
 import { PublicPaymentsController } from './public-payments.controller';
+import { PaymentsController } from './payments.controller';
 
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: Payment.name, schema: PaymentSchema }]),
     forwardRef(() => OrdersModule),
   ],
-  controllers: [PublicPaymentsController],
+  controllers: [PublicPaymentsController, PaymentsController],
   providers: [PaymentsService, PaymentWebhookDispatcherService],
   exports: [PaymentsService, PaymentWebhookDispatcherService],
 })

@@ -38,9 +38,10 @@ export class OrderDraftsService {
     private readonly excel: ExcelSpreadsheetService,
   ) {}
 
-  async createPublic(dto: PublicCreateDraftDto) {
+  async createPublic(tenantId: string, dto: PublicCreateDraftDto) {
     const sessionToken = randomBytes(24).toString('hex');
     const doc = await this.draftModel.create({
+      tenantId: new Types.ObjectId(tenantId),
       sessionToken,
       customerId: dto.customerId
         ? new Types.ObjectId(dto.customerId)
@@ -57,9 +58,12 @@ export class OrderDraftsService {
     return decodeURIComponent(token.trim());
   }
 
-  async getByToken(token: string) {
+  async getByToken(tenantId: string, token: string) {
     const t = this.normalizeToken(token);
-    const doc = await this.draftModel.findOne({ sessionToken: t }).lean().exec();
+    const doc = await this.draftModel
+      .findOne({ sessionToken: t, tenantId: new Types.ObjectId(tenantId) })
+      .lean()
+      .exec();
     if (!doc) throw new NotFoundException();
     return doc;
   }
@@ -72,6 +76,7 @@ export class OrderDraftsService {
   }
 
   private async rebuildLinesFromDto(
+    tenantId: string,
     lines: NonNullable<PublicPatchDraftDto['lines']>,
   ): Promise<OrderDraft['lines']> {
     if (!lines?.length) return [];
@@ -80,7 +85,9 @@ export class OrderDraftsService {
       if (!Types.ObjectId.isValid(line.variantId)) {
         throw new BadRequestException('Invalid variant');
       }
-      const v = await this.variantModel.findById(line.variantId).exec();
+      const v = await this.variantModel
+        .findOne({ _id: line.variantId, tenantId: new Types.ObjectId(tenantId) })
+        .exec();
       if (!v) throw new BadRequestException('Variant not found');
       built.push({
         variantId: v._id as Types.ObjectId,
@@ -92,13 +99,14 @@ export class OrderDraftsService {
   }
 
   private async applyDraftPatch(
+    tenantId: string,
     doc: OrderDraftDocument,
     dto: StaffPatchOrderDraftDto,
     allowWhenLocked: boolean,
   ): Promise<void> {
     this.assertDraftPatchable(doc, allowWhenLocked);
     if (dto.lines) {
-      doc.lines = await this.rebuildLinesFromDto(dto.lines);
+      doc.lines = await this.rebuildLinesFromDto(tenantId, dto.lines);
     }
     if (dto.status !== undefined) doc.status = dto.status;
     if (dto.paymentMethodChoice !== undefined) {
@@ -125,34 +133,42 @@ export class OrderDraftsService {
     }
   }
 
-  async patchByToken(token: string, dto: PublicPatchDraftDto) {
+  async patchByToken(tenantId: string, token: string, dto: PublicPatchDraftDto) {
     const t = this.normalizeToken(token);
-    const doc = await this.draftModel.findOne({ sessionToken: t }).exec();
+    const doc = await this.draftModel
+      .findOne({ sessionToken: t, tenantId: new Types.ObjectId(tenantId) })
+      .exec();
     if (!doc) throw new NotFoundException();
-    await this.applyDraftPatch(doc, dto as StaffPatchOrderDraftDto, false);
+    await this.applyDraftPatch(tenantId, doc, dto as StaffPatchOrderDraftDto, false);
     await doc.save();
     return doc.toObject();
   }
 
-  async patchForStaff(token: string, dto: StaffPatchOrderDraftDto) {
+  async patchForStaff(tenantId: string, token: string, dto: StaffPatchOrderDraftDto) {
     const t = this.normalizeToken(token);
-    const doc = await this.draftModel.findOne({ sessionToken: t }).exec();
+    const doc = await this.draftModel
+      .findOne({ sessionToken: t, tenantId: new Types.ObjectId(tenantId) })
+      .exec();
     if (!doc) throw new NotFoundException();
-    await this.applyDraftPatch(doc, dto, true);
+    await this.applyDraftPatch(tenantId, doc, dto, true);
     await doc.save();
     return doc.toObject();
   }
 
-  async removeByTokenForStaff(token: string) {
+  async removeByTokenForStaff(tenantId: string, token: string) {
     const t = this.normalizeToken(token);
-    const res = await this.draftModel.findOneAndDelete({ sessionToken: t }).exec();
+    const res = await this.draftModel
+      .findOneAndDelete({ sessionToken: t, tenantId: new Types.ObjectId(tenantId) })
+      .exec();
     if (!res) throw new NotFoundException();
     return { deleted: true };
   }
 
-  async submitByToken(token: string, body?: PublicSubmitDraftDto) {
+  async submitByToken(tenantId: string, token: string, body?: PublicSubmitDraftDto) {
     const t = this.normalizeToken(token);
-    const doc = await this.draftModel.findOne({ sessionToken: t }).exec();
+    const doc = await this.draftModel
+      .findOne({ sessionToken: t, tenantId: new Types.ObjectId(tenantId) })
+      .exec();
     if (!doc) throw new NotFoundException();
     if (!doc.lines.length) throw new BadRequestException('No lines on draft');
     const customerId = doc.customerId ?? body?.customerId;
@@ -170,6 +186,7 @@ export class OrderDraftsService {
     }
     if (body?.payment?.method === 'pix') {
       const order = await this.orders.create(
+        tenantId,
         {
           customerId: String(customerId),
           channel: 'online',
@@ -180,8 +197,9 @@ export class OrderDraftsService {
         },
         undefined,
       );
+
       const total = Number(order.total ?? 0);
-      const pay = await this.payments.createPixPayment(String(order._id), total);
+      const pay = await this.payments.createPixPayment(tenantId, String(order._id), total);
       doc.orderId = order._id as Types.ObjectId;
       doc.status = 'submitted';
       await doc.save();
@@ -204,7 +222,7 @@ export class OrderDraftsService {
       };
     }
 
-    const order = await this.orders.create({
+    const order = await this.orders.create(tenantId, {
       customerId: String(customerId),
       status: 'open',
       reference: `draft:${doc.sessionToken}`,
@@ -225,22 +243,27 @@ export class OrderDraftsService {
     return { orderId: String(order._id), draft: doc.toObject() };
   }
 
-  async listForStaff(page: number, limit: number) {
+  async listForStaff(tenantId: string, page: number, limit: number) {
     const skip = skipFromPage(page, limit);
+    const filter = { tenantId: new Types.ObjectId(tenantId) };
     const [items, total] = await Promise.all([
       this.draftModel
-        .find({})
+        .find(filter)
         .sort({ updatedAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
-      this.draftModel.countDocuments({}).exec(),
+      this.draftModel.countDocuments(filter).exec(),
     ]);
     return { items, total, page, limit };
   }
 
-  async findAllDraftsForExport() {
-    return this.draftModel.find({}).sort({ updatedAt: -1 }).lean().exec();
+  async findAllDraftsForExport(tenantId: string) {
+    return this.draftModel
+      .find({ tenantId: new Types.ObjectId(tenantId) })
+      .sort({ updatedAt: -1 })
+      .lean()
+      .exec();
   }
 
   serializeDraftRow(doc: Record<string, unknown>): Record<string, unknown> {
@@ -260,9 +283,10 @@ export class OrderDraftsService {
   }
 
   async exportDraftsBuffer(
+    tenantId: string,
     format: 'xlsx' | 'csv',
   ): Promise<{ buffer: Buffer; filename: string; mime: string }> {
-    const docs = await this.findAllDraftsForExport();
+    const docs = await this.findAllDraftsForExport(tenantId);
     const rows = docs.map((d) =>
       this.serializeDraftRow(d as unknown as Record<string, unknown>),
     );
@@ -302,13 +326,15 @@ export class OrderDraftsService {
   }
 
   async importDraftsFromJson(
+    tenantId: string,
     items: Record<string, unknown>[],
     dryRun: boolean,
   ): Promise<StaffImportResponse> {
-    return this.importDraftRecords(items, dryRun);
+    return this.importDraftRecords(tenantId, items, dryRun);
   }
 
   async importDraftsFromXlsx(
+    tenantId: string,
     buffer: Buffer,
     dryRun: boolean,
   ): Promise<StaffImportResponse> {
@@ -316,10 +342,11 @@ export class OrderDraftsService {
       buffer,
       orderDraftImportHeaderAliases(),
     );
-    return this.importDraftRecords(records, dryRun);
+    return this.importDraftRecords(tenantId, records, dryRun);
   }
 
   private async importDraftRecords(
+    tenantId: string,
     items: Record<string, unknown>[],
     dryRun: boolean,
   ): Promise<StaffImportResponse> {
@@ -358,7 +385,7 @@ export class OrderDraftsService {
         if (dryRun) {
           if (sessionToken.length >= 16) {
             const doc = await this.draftModel
-              .findOne({ sessionToken })
+              .findOne({ sessionToken, tenantId: new Types.ObjectId(tenantId) })
               .lean()
               .exec();
             if (!doc) {
@@ -373,7 +400,7 @@ export class OrderDraftsService {
 
         if (sessionToken.length >= 16) {
           const exists = await this.draftModel
-            .findOne({ sessionToken })
+            .findOne({ sessionToken, tenantId: new Types.ObjectId(tenantId) })
             .exec();
           if (!exists) {
             errors.push({
@@ -385,7 +412,7 @@ export class OrderDraftsService {
           if (Object.keys(dto).length === 0) {
             continue;
           }
-          await this.patchForStaff(sessionToken, dto);
+          await this.patchForStaff(tenantId, sessionToken, dto);
           updated++;
         } else {
           const create: PublicCreateDraftDto = {
@@ -395,7 +422,7 @@ export class OrderDraftsService {
                 : undefined,
             waId: row.waId !== undefined ? String(row.waId).trim() : undefined,
           };
-          await this.createPublic(create);
+          await this.createPublic(tenantId, create);
           imported++;
         }
       } catch (e) {

@@ -20,6 +20,10 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { FeatureGuard } from '../common/guards/feature.guard';
+import { RequireFeature } from '../common/decorators/require-feature.decorator';
+import { Feature } from '../common/enums/feature.enum';
+import { TenantId } from '../common/decorators/tenant-id.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { ImportJsonDto } from '../common/dto/import-json.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -30,29 +34,39 @@ import { PurchasesService } from './purchases.service';
 
 @ApiTags('purchases')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FeatureGuard)
+@RequireFeature(Feature.FINANCIAL)
 @Roles('admin', 'staff')
 @Controller('purchases')
 export class PurchasesController {
   constructor(private readonly purchases: PurchasesService) {}
 
   @Post()
-  create(@Body() dto: CreatePurchaseDto, @CurrentUser() user: JwtUserPayload) {
-    return this.purchases.create(dto, user.sub);
+  create(
+    @TenantId() tenantId: string,
+    @Body() dto: CreatePurchaseDto,
+    @CurrentUser() user: JwtUserPayload,
+  ) {
+    return this.purchases.create(tenantId, dto, user.sub);
   }
 
   @Get()
-  findAll(@Query() q: PaginationQueryDto) {
-    return this.purchases.findAll(q.page, q.limit, q.search);
+  findAll(@TenantId() tenantId: string, @Query() q: PaginationQueryDto) {
+    return this.purchases.findAll(tenantId, q.page, q.limit, q.search);
   }
 
   @Get('export')
-  async export(@Query('format') format?: string, @Query('search') search?: string) {
+  async export(
+    @TenantId() tenantId: string,
+    @Query('format') format?: string,
+    @Query('search') search?: string,
+  ) {
     const fmt = (format ?? 'xlsx').toLowerCase();
     if (fmt !== 'xlsx' && fmt !== 'csv') {
       throw new BadRequestException({ message: 'format must be xlsx or csv' });
     }
     const { buffer, filename, mime } = await this.purchases.exportBuffer(
+      tenantId,
       fmt as 'xlsx' | 'csv',
       search,
     );
@@ -68,6 +82,7 @@ export class PurchasesController {
     FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024 } }),
   )
   async importStaff(
+    @TenantId() tenantId: string,
     @Req() req: Request,
     @CurrentUser() user: JwtUserPayload,
     @Body() body: ImportJsonDto | Record<string, never>,
@@ -84,13 +99,14 @@ export class PurchasesController {
         });
       }
       return this.purchases.importFromJson(
+        tenantId,
         b.items,
         b.dryRun ?? dryRun,
         user.sub,
       );
     }
     if (file?.buffer?.length) {
-      return this.purchases.importFromXlsx(file.buffer, dryRun, user.sub);
+      return this.purchases.importFromXlsx(tenantId, file.buffer, dryRun, user.sub);
     }
     throw new BadRequestException({
       message:
@@ -99,17 +115,21 @@ export class PurchasesController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.purchases.findOne(id);
+  findOne(@TenantId() tenantId: string, @Param('id') id: string) {
+    return this.purchases.findOne(tenantId, id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdatePurchaseDto) {
-    return this.purchases.update(id, dto);
+  update(
+    @TenantId() tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdatePurchaseDto,
+  ) {
+    return this.purchases.update(tenantId, id, dto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.purchases.remove(id);
+  remove(@TenantId() tenantId: string, @Param('id') id: string) {
+    return this.purchases.remove(tenantId, id);
   }
 }

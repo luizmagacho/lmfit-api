@@ -107,9 +107,10 @@ describe('OrdersService', () => {
     });
 
     await service.create(
+      'mock-tenant-id',
       {
         customerId: customerId.toString(),
-        status: 'paid',
+        status: 'open',
         lines: [
           {
             variantId: variantId.toString(),
@@ -147,9 +148,9 @@ describe('OrdersService', () => {
     });
 
     await expect(
-      service.create({
+      service.create('mock-tenant-id', {
         customerId: customerId.toString(),
-        status: 'paid',
+        status: 'open',
         lines: [
           {
             variantId: variantId.toString(),
@@ -199,9 +200,9 @@ describe('OrdersService', () => {
       }),
     });
 
-    await service.create({
+    await service.create('mock-tenant-id', {
       customerId: customerId.toString(),
-      status: 'draft',
+      status: 'open',
       lines: [
         {
           variantId: variantId.toString(),
@@ -244,7 +245,7 @@ describe('OrdersService', () => {
       exec: () => Promise.resolve(doc),
     });
 
-    await service.update(orderId.toString(), { reference: 'new' });
+    await service.update('mock-tenant-id', orderId.toString(), { reference: 'new' });
 
     expect(products.applySaleDeductionsForOrder).not.toHaveBeenCalled();
     expect(products.applySaleReversalsForOrder).not.toHaveBeenCalled();
@@ -279,7 +280,7 @@ describe('OrdersService', () => {
       exec: () => Promise.resolve(doc),
     });
 
-    await service.update(orderId.toString(), { status: 'cancelled' });
+    await service.update('mock-tenant-id', orderId.toString(), { status: 'cancelled' });
 
     expect(products.applySaleReversalsForOrder).toHaveBeenCalledWith(
       orderId,
@@ -328,9 +329,9 @@ describe('OrdersService', () => {
       }),
     });
 
-    const res = await service.create({
+    const res = await service.create('mock-tenant-id', {
       customerId: customerId.toString(),
-      status: 'draft',
+      status: 'open',
       lines: [
         {
           variantId: variantId.toString(),
