@@ -1,4 +1,6 @@
 import {
+  BadRequestException,
+  Body,
   Controller,
   ForbiddenException,
   Get,
@@ -46,5 +48,28 @@ export class PublicPaymentsController {
   async simulateConfirm(@Param('id') id: string) {
     await this.payments.confirmPixPaymentPaid(id);
     return { ok: true };
+  }
+
+  /** Webhook oficial da InfinitePay para confirmação de pagamentos. */
+  @Post('infinitepay-webhook')
+  async infinitePayWebhook(@Body() body: any) {
+    const paymentId = body.order_nsu;
+    if (!paymentId) {
+      throw new BadRequestException('order_nsu is required');
+    }
+    try {
+      await this.payments.confirmInfinitePayPaymentPaid(
+        paymentId,
+        body.transaction_nsu,
+        body.capture_method,
+      );
+      return { success: true };
+    } catch (e: any) {
+      if (e.message?.includes('não está pendente')) {
+        return { success: true, message: 'Already processed' };
+      }
+      console.error('InfinitePay Webhook error:', e);
+      throw new BadRequestException(e.message || 'Error processing webhook');
+    }
   }
 }

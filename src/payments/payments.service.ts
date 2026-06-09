@@ -11,6 +11,7 @@ import { Model, Types } from 'mongoose';
 import { OrdersService } from '../orders/orders.service';
 import { Payment, type PaymentDocument } from './schemas/payment.schema';
 import { PaymentWebhookDispatcherService } from './payment-webhook-dispatcher.service';
+import { TenantsService } from '../tenants/tenants.service';
 
 const DEV_PIX_PLACEHOLDER =
   '00020126580014br.gov.bcb.pix0136126e573aa-c-8eae-47a8-b10a-e143f1c18af1520400005303986540510005802BR5925LMFIT_API_DEV_PIX6009SAO_PAULO62070503***6304ABCD';
@@ -23,6 +24,7 @@ export class PaymentsService {
     private readonly orders: OrdersService,
     private readonly config: ConfigService,
     private readonly webhooks: PaymentWebhookDispatcherService,
+    private readonly tenantsService: TenantsService,
   ) {}
 
   async createPixPayment(tenantId: string, orderId: string, amount: number): Promise<PaymentDocument> {
@@ -61,9 +63,110 @@ export class PaymentsService {
       method: 'infinitepay',
       amount,
     });
-    doc.checkoutUrl = `/checkout/payment-simulation?paymentId=${doc._id}`;
+
+    const localSimulationUrl = `/checkout/payment-simulation?paymentId=${doc._id}`;
+    doc.checkoutUrl = localSimulationUrl;
+
+    try {
+      const tenant = await this.tenantsService.findById(tenantId);
+      if (tenant && tenant.infinitePayTag && tenant.infinitePayApiKey) {
+        const order = (await this.orders.findOne(tenantId, orderId)) as any;
+        if (order) {
+          const items = [];
+          const variantModel = this.paymentModel.db.model('ProductVariant');
+          for (const line of order.lines || []) {
+            let desc = line.description || 'Produto';
+            if (!line.description) {
+              const variant = (await variantModel.findById(line.variantId).lean().exec()) as any;
+              if (variant) {
+                desc = variant.sku || 'Produto';
+              }
+            }
+            items.push({
+              quantity: line.quantity,
+              price: Math.round(line.unitPrice * 100), // Centavos
+              description: desc,
+            });
+          }
+
+          // Fetch customer info if available
+          let customerData: any = undefined;
+          if (order.customerId) {
+            const customerModel = this.paymentModel.db.model('Customer');
+            const customer = (await customerModel.findById(order.customerId).lean().exec()) as any;
+            if (customer) {
+              customerData = {
+                name: customer.name,
+                email: customer.email || undefined,
+                phone_number: customer.phone || undefined,
+              };
+            }
+          }
+
+          const publicApiBaseUrl = this.config.get<string>('PUBLIC_API_BASE_URL') || 'http://localhost:4000';
+          const webAdminBaseUrl = this.config.get<string>('WEB_ADMIN_BASE_URL') || 'http://localhost:3000';
+          const handle = tenant.infinitePayTag.trim().replace(/^\$/, '');
+
+          const payload = {
+            handle,
+            order_nsu: String(doc._id),
+            redirect_url: `${webAdminBaseUrl}/pedido/novo?session=draft:${order.reference?.split(':')[1] || ''}`,
+            webhook_url: `${publicApiBaseUrl}/public/payments/infinitepay-webhook`,
+            items,
+            customer: customerData,
+          };
+
+          const sessionToken = order.reference?.startsWith('draft:') ? order.reference.split(':')[1] : '';
+          if (sessionToken) {
+            payload.redirect_url = `${webAdminBaseUrl}/pedido/novo?session=${encodeURIComponent(sessionToken)}`;
+          }
+
+          const response = await fetch('https://api.checkout.infinitepay.io/links', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${tenant.infinitePayApiKey.trim()}`,
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (response.ok) {
+            const resJson = await response.json() as any;
+            if (resJson && resJson.url) {
+              doc.checkoutUrl = resJson.url;
+            }
+          } else {
+            console.error('InfinitePay Link creation failed with status:', response.status);
+            const errText = await response.text();
+            console.error('InfinitePay Link error response:', errText);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error in createInfinitePayPayment call:', err);
+    }
+
     await doc.save();
     return doc;
+  }
+
+  async confirmInfinitePayPaymentPaid(
+    paymentId: string,
+    transactionNsu?: string,
+    captureMethod?: string,
+  ): Promise<void> {
+    if (!Types.ObjectId.isValid(paymentId)) throw new NotFoundException();
+    const p = await this.paymentModel.findById(paymentId).exec();
+    if (!p) throw new NotFoundException();
+    if (p.status !== 'pending') {
+      throw new BadRequestException('Pagamento não está pendente');
+    }
+    if (transactionNsu) p.transactionNsu = transactionNsu;
+    if (captureMethod) p.captureMethod = captureMethod;
+    await p.save();
+
+    const orderId = String(p.orderId);
+    await this.orders.update(p.tenantId.toString(), orderId, { status: 'completed' }, undefined);
   }
 
   async findPublicStatusById(id: string): Promise<{ status: string; amount?: number; method?: string }> {
