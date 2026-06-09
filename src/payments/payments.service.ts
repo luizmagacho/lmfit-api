@@ -50,14 +50,30 @@ export class PaymentsService {
     return doc;
   }
 
-  async findPublicStatusById(id: string): Promise<{ status: string }> {
-    if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
-    const p = await this.paymentModel.findById(id).select('status').lean().exec();
-    if (!p) throw new NotFoundException();
-    return { status: p.status };
+  async createInfinitePayPayment(tenantId: string, orderId: string, amount: number): Promise<PaymentDocument> {
+    if (!Types.ObjectId.isValid(orderId)) {
+      throw new BadRequestException('orderId inválido');
+    }
+    const doc = await this.paymentModel.create({
+      tenantId: new Types.ObjectId(tenantId),
+      orderId: new Types.ObjectId(orderId),
+      status: 'pending',
+      method: 'infinitepay',
+      amount,
+    });
+    doc.checkoutUrl = `/checkout/payment-simulation?paymentId=${doc._id}`;
+    await doc.save();
+    return doc;
   }
 
-  /** Confirma PIX: pedido → `paid` (estoque via OrdersService) e pagamento → `paid`. */
+  async findPublicStatusById(id: string): Promise<{ status: string; amount?: number; method?: string }> {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
+    const p = await this.paymentModel.findById(id).select('status amount method').lean().exec();
+    if (!p) throw new NotFoundException();
+    return { status: p.status, amount: p.amount, method: p.method };
+  }
+
+  /** Confirma pagamento (Pix ou InfinitePay): pedido → `completed` (estoque via OrdersService) e pagamento → `paid`. */
   async confirmPixPaymentPaid(paymentId: string): Promise<void> {
     if (!Types.ObjectId.isValid(paymentId)) throw new NotFoundException();
     const p = await this.paymentModel.findById(paymentId).exec();
@@ -72,7 +88,7 @@ export class PaymentsService {
   async markExpiredIfDue(paymentId: string): Promise<void> {
     const p = await this.paymentModel.findById(paymentId).exec();
     if (!p || p.status !== 'pending') return;
-    if (p.expiresAt >= new Date()) return;
+    if (!p.expiresAt || p.expiresAt >= new Date()) return;
     p.status = 'expired';
     await p.save();
     await this.webhooks.dispatchPaymentEvent('payment.expired', {

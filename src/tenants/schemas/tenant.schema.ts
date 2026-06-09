@@ -65,6 +65,12 @@ export class Tenant {
 
   @Prop({ type: Types.ObjectId, ref: 'User' })
   ownerUserId?: Types.ObjectId;
+
+  @Prop({ trim: true })
+  infinitePayTag?: string;
+
+  @Prop({ trim: true })
+  infinitePayApiKey?: string;
 }
 
 export const TenantSchema = SchemaFactory.createForClass(Tenant);

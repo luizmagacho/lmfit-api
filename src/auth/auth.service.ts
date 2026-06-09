@@ -41,6 +41,7 @@ export class AuthService {
       userId: user._id as Types.ObjectId,
       tokenHash,
       expiresAt,
+      tenantId: user.tenantId as Types.ObjectId,
     });
 
     const role = normalizeRoleForJwt(user.role as UserRole);
@@ -90,6 +91,7 @@ export class AuthService {
       userId: user._id as Types.ObjectId,
       tokenHash: newHash,
       expiresAt,
+      tenantId: user.tenantId as Types.ObjectId,
     });
 
     const role = normalizeRoleForJwt(user.role as UserRole);

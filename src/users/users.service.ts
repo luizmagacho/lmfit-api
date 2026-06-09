@@ -47,8 +47,10 @@ export class UsersService {
         active: true,
         plan: 'enterprise',
         branding: {
+          logoUrl: 'https://d1a9qnv764bsoo.cloudfront.net/stores/006/316/201/themes/common/logo-813858800-1750428827-d18edfd75754df23704c77cbd129bbc91750428827-1024-1024.webp?w=1400',
+          faviconUrl: 'https://d1a9qnv764bsoo.cloudfront.net/stores/006/316/201/themes/common/logo-813858800-1750428827-d18edfd75754df23704c77cbd129bbc91750428827-1024-1024.webp?w=1400',
           primaryColor: '#f68006',
-          secondaryColor: '#22d3ee',
+          secondaryColor: '#000000',
           darkMode: false,
         },
       });

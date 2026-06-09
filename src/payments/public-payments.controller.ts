@@ -40,4 +40,11 @@ export class PublicPaymentsController {
     await this.payments.confirmPixPaymentPaid(id);
     return { ok: true };
   }
+
+  /** Simulação pública para testes locais de checkout. */
+  @Post(':id/simulate-confirm')
+  async simulateConfirm(@Param('id') id: string) {
+    await this.payments.confirmPixPaymentPaid(id);
+    return { ok: true };
+  }
 }

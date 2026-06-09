@@ -26,4 +26,14 @@ export class UpdateBrandingDto {
   @IsOptional()
   @IsBoolean()
   darkMode?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  infinitePayTag?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  infinitePayApiKey?: string;
 }

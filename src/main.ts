@@ -48,8 +48,9 @@ async function bootstrap() {
   const allowedOrigins = [
     webOrigin,
     ...extraOrigins,
-    /^https?:\/\/localhost(:\d+)?$/,
-    /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+    /^https?:\/\/([^.]+\.)?localhost(:\d+)?$/,
+    /^https?:\/\/([^.]+\.)?127\.0\.0\.1(:\d+)?$/,
+    /\.kivo\.app$/,
     /\.vercel\.app$/,
   ];
 
@@ -65,6 +66,8 @@ async function bootstrap() {
       'Authorization',
       'X-Requested-With',
       'Cookie',
+      'x-tenant-slug',
+      'X-Tenant-Slug',
     ],
     exposedHeaders: ['Content-Disposition'],
   });

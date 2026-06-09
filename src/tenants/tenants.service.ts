@@ -136,6 +136,8 @@ export class TenantsService {
     if (dto.primaryColor !== undefined) setFields['branding.primaryColor'] = dto.primaryColor;
     if (dto.secondaryColor !== undefined) setFields['branding.secondaryColor'] = dto.secondaryColor;
     if (dto.darkMode !== undefined) setFields['branding.darkMode'] = dto.darkMode;
+    if (dto.infinitePayTag !== undefined) setFields['infinitePayTag'] = dto.infinitePayTag;
+    if (dto.infinitePayApiKey !== undefined) setFields['infinitePayApiKey'] = dto.infinitePayApiKey;
 
     const doc = await this.tenantModel
       .findByIdAndUpdate(id, { $set: setFields }, { new: true })
@@ -186,6 +188,7 @@ export class TenantsService {
       name: tenant.name,
       branding: tenant.branding,
       whatsappNumber: tenant.whatsappNumber,
+      infinitePayTag: tenant.infinitePayTag,
     };
   }
 }

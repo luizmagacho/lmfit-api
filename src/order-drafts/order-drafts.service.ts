@@ -222,8 +222,45 @@ export class OrderDraftsService {
       };
     }
 
+    if (body?.payment?.method === 'infinitepay') {
+      const order = await this.orders.create(
+        tenantId,
+        {
+          customerId: String(customerId),
+          channel: 'online',
+          status: 'open',
+          reference: `draft:${doc.sessionToken}`,
+          notes: notesParts.length ? notesParts.join('\n') : undefined,
+          lines: lineInputs,
+        },
+        undefined,
+      );
+
+      const total = Number(order.total ?? 0);
+      const pay = await this.payments.createInfinitePayPayment(tenantId, String(order._id), total);
+      doc.orderId = order._id as Types.ObjectId;
+      doc.status = 'submitted';
+      await doc.save();
+      const web = this.config.get<string>('WEB_ADMIN_BASE_URL') ?? '';
+      const subject = `[LM FIT] Pedido aguardando pagamento InfinitePay (${order._id})`;
+      const text = `Pedido público (InfinitePay).\nCliente: ${customerId}\nTotal: ${order.total}\nAdmin: ${web}/orders`;
+      await this.notify.sendStaffEmail(subject, text).catch(() => undefined);
+      this.notify.logStaffAlert('order_draft_submitted', {
+        orderId: String(order._id),
+        draftToken: doc.sessionToken,
+      });
+      return {
+        orderId: String(order._id),
+        payment: {
+          paymentId: String(pay._id),
+          checkoutUrl: pay.checkoutUrl,
+        },
+      };
+    }
+
     const order = await this.orders.create(tenantId, {
       customerId: String(customerId),
+      channel: 'online',
       status: 'open',
       reference: `draft:${doc.sessionToken}`,
       notes: notesParts.length ? notesParts.join('\n') : undefined,

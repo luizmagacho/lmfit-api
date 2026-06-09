@@ -21,23 +21,32 @@ export class Payment {
   })
   status: PaymentStatus;
 
-  @Prop({ type: String, enum: ['pix'], required: true })
-  method: 'pix';
+  @Prop({ type: String, enum: ['pix', 'infinitepay'], required: true })
+  method: 'pix' | 'infinitepay';
 
   @Prop({ type: Number, required: true })
   amount: number;
 
-  @Prop({ required: true, trim: true })
-  qrCode: string;
+  @Prop({ trim: true })
+  qrCode?: string;
 
   @Prop({ trim: true })
   qrCodeImage?: string;
 
-  @Prop({ type: Date, required: true })
-  expiresAt: Date;
+  @Prop({ type: Date })
+  expiresAt?: Date;
+
+  @Prop({ trim: true })
+  checkoutUrl?: string;
 
   @Prop({ type: Date })
   paidAt?: Date;
+
+  @Prop({ trim: true })
+  transactionNsu?: string;
+
+  @Prop({ trim: true })
+  captureMethod?: string;
 }
 
 export const PaymentSchema = SchemaFactory.createForClass(Payment);
