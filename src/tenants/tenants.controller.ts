@@ -72,6 +72,11 @@ export class TenantsController {
 export class PublicTenantsController {
   constructor(private readonly tenants: TenantsService) {}
 
+  @Get()
+  listPublicActive() {
+    return this.tenants.listPublicActive();
+  }
+
   @Get(':slug')
   getPublicBranding(@Param('slug') slug: string) {
     return this.tenants.getPublicBranding(slug);

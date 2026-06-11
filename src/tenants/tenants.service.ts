@@ -138,6 +138,11 @@ export class TenantsService {
     if (dto.darkMode !== undefined) setFields['branding.darkMode'] = dto.darkMode;
     if (dto.infinitePayTag !== undefined) setFields['infinitePayTag'] = dto.infinitePayTag;
     if (dto.infinitePayApiKey !== undefined) setFields['infinitePayApiKey'] = dto.infinitePayApiKey;
+    if (dto.geminiApiKey !== undefined) setFields['geminiApiKey'] = dto.geminiApiKey;
+    if (dto.metaAppSecret !== undefined) setFields['metaAppSecret'] = dto.metaAppSecret;
+    if (dto.metaWhatsappVerifyToken !== undefined) setFields['metaWhatsappVerifyToken'] = dto.metaWhatsappVerifyToken;
+    if (dto.metaWhatsappPhoneNumberId !== undefined) setFields['metaWhatsappPhoneNumberId'] = dto.metaWhatsappPhoneNumberId;
+    if (dto.metaWhatsappAccessToken !== undefined) setFields['metaWhatsappAccessToken'] = dto.metaWhatsappAccessToken;
 
     const doc = await this.tenantModel
       .findByIdAndUpdate(id, { $set: setFields }, { new: true })
@@ -190,5 +195,20 @@ export class TenantsService {
       whatsappNumber: tenant.whatsappNumber,
       infinitePayTag: tenant.infinitePayTag,
     };
+  }
+
+  async listPublicActive() {
+    const items = await this.tenantModel
+      .find({ active: { $ne: false } })
+      .sort({ name: 1 })
+      .lean()
+      .exec();
+
+    return items.map(tenant => ({
+      slug: tenant.slug,
+      name: tenant.name,
+      branding: tenant.branding,
+      whatsappNumber: tenant.whatsappNumber,
+    }));
   }
 }

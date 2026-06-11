@@ -36,4 +36,29 @@ export class UpdateBrandingDto {
   @IsOptional()
   @IsString()
   infinitePayApiKey?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  geminiApiKey?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  metaAppSecret?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  metaWhatsappVerifyToken?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  metaWhatsappPhoneNumberId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  metaWhatsappAccessToken?: string;
 }

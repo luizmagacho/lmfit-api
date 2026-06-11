@@ -61,7 +61,7 @@ export class InboundMessageProcessor {
 
     let parsed;
     try {
-      parsed = await this.gemini.parseIntent(text);
+      parsed = await this.gemini.parseIntent(text, doc.tenantId.toString());
     } catch (e) {
       this.log.error(e);
       await this.messages.updateOne(wamid, {

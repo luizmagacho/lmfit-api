@@ -252,7 +252,7 @@ Detalhe: ${entry.detail ?? ''}
 Valor: R$ ${Math.abs(entry.amount).toFixed(2)} (${entry.amount >= 0 ? 'entrada' : 'saída'})
 Data: ${entry.date.toLocaleDateString('pt-BR')}`;
 
-    const analysis = await this.gemini.analyzeTransaction(text);
+    const analysis = await this.gemini.analyzeTransaction(text, tenantId);
     await this.model.findOneAndUpdate(
       { _id: id, tenantId: new Types.ObjectId(tenantId) },
       { aiAnalysis: analysis }

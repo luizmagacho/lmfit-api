@@ -63,6 +63,21 @@ export class Tenant {
   @Prop({ type: TenantLimits, default: () => ({}) })
   limits: TenantLimits;
 
+  @Prop({ trim: true })
+  geminiApiKey?: string;
+
+  @Prop({ trim: true })
+  metaAppSecret?: string;
+
+  @Prop({ trim: true })
+  metaWhatsappVerifyToken?: string;
+
+  @Prop({ trim: true })
+  metaWhatsappPhoneNumberId?: string;
+
+  @Prop({ trim: true })
+  metaWhatsappAccessToken?: string;
+
   @Prop({ type: Types.ObjectId, ref: 'User' })
   ownerUserId?: Types.ObjectId;
 

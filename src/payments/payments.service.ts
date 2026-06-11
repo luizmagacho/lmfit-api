@@ -14,7 +14,7 @@ import { PaymentWebhookDispatcherService } from './payment-webhook-dispatcher.se
 import { TenantsService } from '../tenants/tenants.service';
 
 const DEV_PIX_PLACEHOLDER =
-  '00020126580014br.gov.bcb.pix0136126e573aa-c-8eae-47a8-b10a-e143f1c18af1520400005303986540510005802BR5925LMFIT_API_DEV_PIX6009SAO_PAULO62070503***6304ABCD';
+  '00020126580014br.gov.bcb.pix0136126e573aa-c-8eae-47a8-b10a-e143f1c18af1520400005303986540510005802BR5925KIVONI_API_DEV_PIX6009SAO_PAULO62070503***6304ABCD';
 
 @Injectable()
 export class PaymentsService {

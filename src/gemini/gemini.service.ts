@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { Tenant } from '../tenants/schemas/tenant.schema';
 
 export type GeminiIntentResult = {
   intent: 'CREATE_ORDER' | 'CREATE_PURCHASE' | 'UNKNOWN';
@@ -45,10 +48,19 @@ Rules:
 export class GeminiService {
   private readonly log = new Logger(GeminiService.name);
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    @InjectModel(Tenant.name) private readonly tenantModel: Model<Tenant>,
+  ) {}
 
-  async parseIntent(text: string): Promise<GeminiIntentResult> {
-    const key = this.config.get<string>('GEMINI_API_KEY');
+  async parseIntent(text: string, tenantId?: string): Promise<GeminiIntentResult> {
+    let key = this.config.get<string>('GEMINI_API_KEY');
+    if (tenantId) {
+      const tenant = await this.tenantModel.findById(tenantId).exec();
+      if (tenant?.geminiApiKey) {
+        key = tenant.geminiApiKey;
+      }
+    }
     const modelId = this.config.get<string>('GEMINI_MODEL') ?? 'gemini-2.0-flash';
     if (!key) {
       this.log.warn('GEMINI_API_KEY missing; returning UNKNOWN');
@@ -77,7 +89,7 @@ export class GeminiService {
     return parsed;
   }
 
-  async analyzeTransaction(text: string): Promise<{
+  async analyzeTransaction(text: string, tenantId?: string): Promise<{
     category: string;
     customerHint: string | null;
     entityType?: string;
@@ -85,7 +97,13 @@ export class GeminiService {
     confidence: number;
     notes: string;
   }> {
-    const key = this.config.get<string>('GEMINI_API_KEY');
+    let key = this.config.get<string>('GEMINI_API_KEY');
+    if (tenantId) {
+      const tenant = await this.tenantModel.findById(tenantId).exec();
+      if (tenant?.geminiApiKey) {
+        key = tenant.geminiApiKey;
+      }
+    }
     const modelId = this.config.get<string>('GEMINI_MODEL') ?? 'gemini-2.0-flash';
     if (!key) {
       return {

@@ -18,7 +18,7 @@ export const productImageUploadOptions: Options = (() => {
     const storage = new CloudinaryStorage({
       cloudinary,
       params: {
-        folder: 'lmfit-products',
+        folder: 'kivoni-products',
         allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'],
         format: 'jpg',
         public_id: (_req: Express.Request, file: Express.Multer.File) => {

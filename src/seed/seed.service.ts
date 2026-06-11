@@ -21,7 +21,7 @@ import {
   Suppliers as demoSuppliers,
   type PurchaseFixture as DemoPurchaseFixture,
   type PurchaseLineFixture as DemoPurchaseLineFixture,
-} from './lmfit-demo.fixtures';
+} from './kivoni-demo.fixtures';
 
 @Injectable()
 export class SeedService implements OnModuleInit {
@@ -59,28 +59,28 @@ export class SeedService implements OnModuleInit {
     const tenantsToSeed = isProduction
       ? [
           {
-            slug: 'lmfit',
-            name: 'LMFit Store',
-            adminEmail: 'admin@lmfit.local',
+            slug: 'kivoni',
+            name: 'Kivoni Store',
+            adminEmail: 'admin@kivoni.local',
             branding: {
-              logoUrl: 'https://d1a9qnv764bsoo.cloudfront.net/stores/006/316/201/themes/common/logo-813858800-1750428827-d18edfd75754df23704c77cbd129bbc91750428827-1024-1024.webp?w=1400',
-              faviconUrl: 'https://d1a9qnv764bsoo.cloudfront.net/stores/006/316/201/themes/common/logo-813858800-1750428827-d18edfd75754df23704c77cbd129bbc91750428827-1024-1024.webp?w=1400',
-              primaryColor: '#f68006',
-              secondaryColor: '#000000',
+              logoUrl: '/kivoni-logo.png',
+              faviconUrl: '/kivoni-logo.png',
+              primaryColor: '#7c3aed',
+              secondaryColor: '#06b6d4',
               darkMode: false,
             }
           }
         ]
       : [
           {
-            slug: 'lmfit',
-            name: 'LMFit Store',
-            adminEmail: 'admin@lmfit.local',
+            slug: 'kivoni',
+            name: 'Kivoni Store',
+            adminEmail: 'admin@kivoni.local',
             branding: {
-              logoUrl: 'https://d1a9qnv764bsoo.cloudfront.net/stores/006/316/201/themes/common/logo-813858800-1750428827-d18edfd75754df23704c77cbd129bbc91750428827-1024-1024.webp?w=1400',
-              faviconUrl: 'https://d1a9qnv764bsoo.cloudfront.net/stores/006/316/201/themes/common/logo-813858800-1750428827-d18edfd75754df23704c77cbd129bbc91750428827-1024-1024.webp?w=1400',
-              primaryColor: '#f68006',
-              secondaryColor: '#000000',
+              logoUrl: '/kivoni-logo.png',
+              faviconUrl: '/kivoni-logo.png',
+              primaryColor: '#7c3aed',
+              secondaryColor: '#06b6d4',
               darkMode: false,
             }
           },

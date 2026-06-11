@@ -29,12 +29,17 @@ describe('OrdersService', () => {
     orderModel = {
       create: jest.fn(),
       findById: jest.fn(),
+      findOne: jest.fn(),
       find: jest.fn(),
-      countDocuments: jest.fn(),
+      countDocuments: jest.fn().mockReturnValue({
+        exec: () => Promise.resolve(0),
+      }),
       findByIdAndDelete: jest.fn(),
     };
+    (orderModel as any).findOne = orderModel.findById;
     variantModel = {
       findById: jest.fn(),
+      findOne: jest.fn(),
       find: jest.fn().mockReturnValue({
         lean: () => ({
           exec: () =>
@@ -48,6 +53,7 @@ describe('OrdersService', () => {
         }),
       }),
     };
+    (variantModel as any).findOne = variantModel.findById;
     products = {
       applySaleDeductionsForOrder: jest.fn().mockResolvedValue(undefined),
       applySaleReversalsForOrder: jest.fn().mockResolvedValue(undefined),
@@ -93,7 +99,7 @@ describe('OrdersService', () => {
       toObject: () => ({
         _id: orderId,
         customerId,
-        status: 'paid',
+        status: 'completed',
         channel: 'online',
         lines: [
           {
@@ -107,10 +113,10 @@ describe('OrdersService', () => {
     });
 
     await service.create(
-      'mock-tenant-id',
+      '6628e69bd79b4e2fbcf01bc4',
       {
         customerId: customerId.toString(),
-        status: 'open',
+        status: 'completed',
         lines: [
           {
             variantId: variantId.toString(),
@@ -148,9 +154,9 @@ describe('OrdersService', () => {
     });
 
     await expect(
-      service.create('mock-tenant-id', {
+      service.create('6628e69bd79b4e2fbcf01bc4', {
         customerId: customerId.toString(),
-        status: 'open',
+        status: 'completed',
         lines: [
           {
             variantId: variantId.toString(),
@@ -200,7 +206,7 @@ describe('OrdersService', () => {
       }),
     });
 
-    await service.create('mock-tenant-id', {
+    await service.create('6628e69bd79b4e2fbcf01bc4', {
       customerId: customerId.toString(),
       status: 'open',
       lines: [
@@ -223,7 +229,7 @@ describe('OrdersService', () => {
     };
     const doc = {
       _id: orderId,
-      status: 'paid',
+      status: 'completed',
       lines: [line],
       total: 10,
       channel: 'site',
@@ -233,7 +239,7 @@ describe('OrdersService', () => {
       save: jest.fn().mockResolvedValue(undefined),
       toObject: () => ({
         _id: orderId,
-        status: 'paid',
+        status: 'completed',
         lines: [line],
         total: 10,
         channel: 'site',
@@ -245,7 +251,7 @@ describe('OrdersService', () => {
       exec: () => Promise.resolve(doc),
     });
 
-    await service.update('mock-tenant-id', orderId.toString(), { reference: 'new' });
+    await service.update('6628e69bd79b4e2fbcf01bc4', orderId.toString(), { reference: 'new' });
 
     expect(products.applySaleDeductionsForOrder).not.toHaveBeenCalled();
     expect(products.applySaleReversalsForOrder).not.toHaveBeenCalled();
@@ -259,7 +265,7 @@ describe('OrdersService', () => {
     };
     const doc = {
       _id: orderId,
-      status: 'paid',
+      status: 'completed',
       lines: [line],
       total: 10,
       channel: 'site',
@@ -280,7 +286,7 @@ describe('OrdersService', () => {
       exec: () => Promise.resolve(doc),
     });
 
-    await service.update('mock-tenant-id', orderId.toString(), { status: 'cancelled' });
+    await service.update('6628e69bd79b4e2fbcf01bc4', orderId.toString(), { status: 'cancelled' });
 
     expect(products.applySaleReversalsForOrder).toHaveBeenCalledWith(
       orderId,
@@ -329,7 +335,7 @@ describe('OrdersService', () => {
       }),
     });
 
-    const res = await service.create('mock-tenant-id', {
+    const res = await service.create('6628e69bd79b4e2fbcf01bc4', {
       customerId: customerId.toString(),
       status: 'open',
       lines: [

@@ -30,7 +30,7 @@ export class NotificationsService {
           }
         : undefined,
     });
-    const from = this.config.get<string>('SMTP_FROM') ?? 'noreply@lmfit.local';
+    const from = this.config.get<string>('SMTP_FROM') ?? 'noreply@kivoni.local';
     await transporter.sendMail({
       from,
       to: to.split(',').map((s) => s.trim()),

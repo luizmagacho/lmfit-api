@@ -41,7 +41,7 @@ import { TenantsModule } from './tenants/tenants.module';
     ThrottlerModule.forRoot([
       { name: 'default', ttl: 60_000, limit: 120 },
     ]),
-    MongooseModule.forRoot(process.env.MONGODB_URI ?? 'mongodb://127.0.0.1:27017/lmfit'),
+    MongooseModule.forRoot(process.env.MONGODB_URI ?? 'mongodb://127.0.0.1:27017/kivoni'),
     ExcelModule,
     JwtRegisteredModule,
     NotificationsModule,
