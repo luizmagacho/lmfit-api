@@ -6,6 +6,7 @@ import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import type { JwtUserPayload } from './jwt-user.payload';
 import { LoginDto } from './dto/login.dto';
+import { TenantId } from '../common/decorators/tenant-id.decorator';
 import { RefreshDto } from './dto/refresh.dto';
 
 @ApiTags('auth')
@@ -15,8 +16,8 @@ export class AuthController {
 
   @Throttle({ default: { limit: 15, ttl: 60_000 } })
   @Post('login')
-  login(@Body() dto: LoginDto) {
-    return this.auth.login(dto.email, dto.password);
+  login(@TenantId() tenantId: string, @Body() dto: LoginDto) {
+    return this.auth.login(tenantId, dto.email, dto.password);
   }
 
   @Throttle({ default: { limit: 40, ttl: 60_000 } })

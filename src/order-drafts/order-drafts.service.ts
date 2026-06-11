@@ -13,6 +13,7 @@ import { Model, Types } from 'mongoose';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OrdersService } from '../orders/orders.service';
 import { PaymentsService } from '../payments/payments.service';
+import { CustomersService } from '../customers/customers.service';
 import { ProductVariant } from '../products/schemas/product-variant.schema';
 import {
   ORDER_DRAFT_EXPORT_COLUMNS,
@@ -33,6 +34,7 @@ export class OrderDraftsService {
     private readonly variantModel: Model<ProductVariant>,
     private readonly orders: OrdersService,
     private readonly payments: PaymentsService,
+    private readonly customers: CustomersService,
     private readonly notify: NotificationsService,
     private readonly config: ConfigService,
     private readonly excel: ExcelSpreadsheetService,
@@ -171,9 +173,24 @@ export class OrderDraftsService {
       .exec();
     if (!doc) throw new NotFoundException();
     if (!doc.lines.length) throw new BadRequestException('No lines on draft');
-    const customerId = doc.customerId ?? body?.customerId;
+    let customerId = doc.customerId ?? body?.customerId;
+    
+    // Auto-create customer if missing but metadata has customer info
+    if (!customerId && doc.metadata && typeof doc.metadata === 'object' && 'customer' in doc.metadata) {
+      const custData = (doc.metadata as any).customer;
+      if (custData && custData.name) {
+        const newCustomer = await this.customers.create(tenantId, {
+          name: String(custData.name).trim(),
+          phone: custData.phone ? String(custData.phone).trim() : undefined,
+          email: custData.email ? String(custData.email).trim() : undefined,
+        });
+        customerId = newCustomer._id;
+        doc.customerId = customerId as Types.ObjectId;
+      }
+    }
+
     if (!customerId || !Types.ObjectId.isValid(String(customerId))) {
-      throw new BadRequestException('customerId is required to submit');
+      throw new BadRequestException('customerId is required to submit (or provide customer metadata)');
     }
     const lineInputs = doc.lines.map((l) => ({
       variantId: String(l.variantId),
@@ -184,6 +201,16 @@ export class OrderDraftsService {
     if (doc.paymentMethodChoice) {
       notesParts.push(`Pagamento preferido: ${doc.paymentMethodChoice}`);
     }
+
+    let referenceString = `draft:${doc.sessionToken}`;
+    if (doc.metadata && typeof doc.metadata === 'object' && 'customer' in doc.metadata) {
+      const custData = (doc.metadata as any).customer;
+      if (custData && custData.name && custData.phone) {
+        const totalVal = doc.lines.reduce((acc, l) => acc + (l.unitPrice * l.quantity), 0);
+        const fmtTotal = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalVal);
+        referenceString = `WhatsApp: ${custData.name} - ${custData.phone} - ${fmtTotal}`;
+      }
+    }
     if (body?.payment?.method === 'pix') {
       const order = await this.orders.create(
         tenantId,
@@ -191,7 +218,7 @@ export class OrderDraftsService {
           customerId: String(customerId),
           channel: 'online',
           status: 'open',
-          reference: `draft:${doc.sessionToken}`,
+          reference: referenceString,
           notes: notesParts.length ? notesParts.join('\n') : undefined,
           lines: lineInputs,
         },
@@ -229,7 +256,7 @@ export class OrderDraftsService {
           customerId: String(customerId),
           channel: 'online',
           status: 'open',
-          reference: `draft:${doc.sessionToken}`,
+          reference: referenceString,
           notes: notesParts.length ? notesParts.join('\n') : undefined,
           lines: lineInputs,
         },
@@ -262,7 +289,7 @@ export class OrderDraftsService {
       customerId: String(customerId),
       channel: 'online',
       status: 'open',
-      reference: `draft:${doc.sessionToken}`,
+      reference: referenceString,
       notes: notesParts.length ? notesParts.join('\n') : undefined,
       lines: lineInputs,
     });

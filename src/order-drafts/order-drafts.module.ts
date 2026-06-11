@@ -6,6 +6,7 @@ import {
 } from '../products/schemas/product-variant.schema';
 import { OrdersModule } from '../orders/orders.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { CustomersModule } from '../customers/customers.module';
 import { OrderDraft, OrderDraftSchema } from './schemas/order-draft.schema';
 import { OrderDraftsService } from './order-drafts.service';
 import { PublicOrderDraftsController } from './public-order-drafts.controller';
@@ -15,6 +16,7 @@ import { OrderDraftsController } from './order-drafts.controller';
   imports: [
     OrdersModule,
     PaymentsModule,
+    CustomersModule,
     MongooseModule.forFeature([
       { name: OrderDraft.name, schema: OrderDraftSchema },
       { name: ProductVariant.name, schema: ProductVariantSchema },

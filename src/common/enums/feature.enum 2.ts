@@ -1,0 +1,17 @@
+export enum Feature {
+  CATALOG = 'catalog',
+  INVENTORY = 'inventory',
+  CUSTOMERS = 'customers',
+  ORDERS = 'orders',
+  SUPPLIERS = 'suppliers',
+  REPORTS_BASIC = 'reports_basic',
+  EXPORT = 'export',
+  WHOLESALE = 'wholesale',
+  PRODUCTION = 'production',
+  CHATBOT = 'chatbot',
+  CHECKOUT = 'checkout',
+  FINANCIAL = 'financial',
+  INVOICES = 'invoices',
+  REPORTS_ADVANCED = 'reports_advanced',
+  API_ACCESS = 'api_access',
+}

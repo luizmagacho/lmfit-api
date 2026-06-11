@@ -27,8 +27,8 @@ export class AuthService {
     return createHash('sha256').update(raw).digest('hex');
   }
 
-  async login(email: string, password: string) {
-    const user = await this.users.findByEmail(undefined, email);
+  async login(tenantId: string, email: string, password: string) {
+    const user = await this.users.findByEmail(tenantId, email);
     if (!user) throw new UnauthorizedException('Invalid credentials');
     const ok = await argon2.verify(user.passwordHash, password);
     if (!ok) throw new UnauthorizedException('Invalid credentials');
