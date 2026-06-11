@@ -66,6 +66,7 @@ export class ProductionService {
       overheadPercent: dto.overheadPercent ?? 0,
       targetMarginPercent: dto.targetMarginPercent ?? 60,
       notes: dto.notes,
+      imageUrl: dto.imageUrl,
       dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
       ...computed,
     });
@@ -144,6 +145,7 @@ export class ProductionService {
     if (dto.overheadPercent !== undefined) payload.overheadPercent = dto.overheadPercent;
     if (dto.targetMarginPercent !== undefined) payload.targetMarginPercent = dto.targetMarginPercent;
     if (dto.notes !== undefined) payload.notes = dto.notes;
+    if (dto.imageUrl !== undefined) payload.imageUrl = dto.imageUrl;
     if (dto.dueDate !== undefined) payload.dueDate = new Date(dto.dueDate);
 
     const doc = await this.model
