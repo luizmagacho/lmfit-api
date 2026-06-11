@@ -16,7 +16,7 @@ export const productImageUploadOptions: Options = (() => {
       cloudinary,
       params: {
         folder: 'lmfit-products',
-        allowed_formats: ['jpg', 'jpeg', 'png'],
+        allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'],
         public_id: (_req: Express.Request, file: Express.Multer.File) => {
           const name = file.originalname.split('.')[0];
           return `${randomUUID()}-${name}`.substring(0, 100);
@@ -26,7 +26,7 @@ export const productImageUploadOptions: Options = (() => {
 
     return {
       storage,
-      limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
     };
   }
 
@@ -46,17 +46,18 @@ export const productImageUploadOptions: Options = (() => {
         cb(null, `${randomUUID()}${ext}`);
       },
     }),
-    limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
     fileFilter: (
       _req: Request,
       file: Express.Multer.File,
       cb: (error: Error | null, acceptFile: boolean) => void,
     ) => {
-      if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/png') {
+      const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
+      if (allowed.includes(file.mimetype)) {
         cb(null, true);
       } else {
         cb(
-          new UnsupportedMediaTypeException('Apenas JPEG e PNG são aceitos.'),
+          new UnsupportedMediaTypeException('Formato não suportado (apenas JPEG, PNG, WEBP, HEIC).'),
           false,
         );
       }

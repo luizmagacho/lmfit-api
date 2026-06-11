@@ -61,8 +61,8 @@ export class ProductsController {
     if (!file) {
       throw new BadRequestException('Nenhum arquivo enviado no campo "file".');
     }
-    if ((file as { size?: number }).size && (file as { size: number }).size > 5 * 1024 * 1024) {
-      throw new PayloadTooLargeException('Arquivo excede o limite de 5 MB.');
+    if ((file as { size?: number }).size && (file as { size: number }).size > 10 * 1024 * 1024) {
+      throw new PayloadTooLargeException('Arquivo excede o limite de 10 MB.');
     }
     // Se Cloudinary foi usado, ele retorna a URL completa no file.path
     if (file.path && file.path.startsWith('http')) {
