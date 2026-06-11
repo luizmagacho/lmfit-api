@@ -94,6 +94,10 @@ export class ProductionBatch {
   @Prop({ trim: true })
   notes?: string;
 
+  /** Imagem da peça sendo produzida */
+  @Prop({ trim: true })
+  imageUrl?: string;
+
   /** Data prevista de conclusão */
   @Prop({ type: Date })
   dueDate?: Date;

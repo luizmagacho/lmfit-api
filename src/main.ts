@@ -52,6 +52,7 @@ async function bootstrap() {
     /^https?:\/\/([^.]+\.)?127\.0\.0\.1(:\d+)?$/,
     /\.kivo\.app$/,
     /\.vercel\.app$/,
+    /^https?:\/\/.*\.lmfit\.com\.br$/,
   ];
 
   console.log('CORS Allowed Origins:', allowedOrigins.filter(o => typeof o === 'string'));

@@ -99,6 +99,11 @@ export class CreateProductionBatchDto {
   @IsString()
   notes?: string;
 
+  @ApiPropertyOptional({ description: 'URL da imagem da peça' })
+  @IsOptional()
+  @IsString()
+  imageUrl?: string;
+
   @ApiPropertyOptional({ description: 'Data prevista de conclusão (ISO)' })
   @IsOptional()
   @IsString()
