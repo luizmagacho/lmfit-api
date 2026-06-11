@@ -1,3 +1,6 @@
+import { config as loadDotenv } from 'dotenv';
+loadDotenv();
+
 import { UnsupportedMediaTypeException } from '@nestjs/common';
 import type { Request } from 'express';
 import { diskStorage } from 'multer';
