@@ -17,6 +17,7 @@ export const productImageUploadOptions: Options = (() => {
       params: {
         folder: 'lmfit-products',
         allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'],
+        format: 'jpg',
         public_id: (_req: Express.Request, file: Express.Multer.File) => {
           const name = file.originalname.split('.')[0];
           return `${randomUUID()}-${name}`.substring(0, 100);
