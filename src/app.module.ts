@@ -26,6 +26,7 @@ import { UsersModule } from './users/users.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { CashflowModule } from './cashflow/cashflow.module';
 import { ProductionModule } from './production/production.module';
+import { MaterialsModule } from './materials/materials.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { ProductionModule } from './production/production.module';
     WhatsappModule,
     CashflowModule,
     ProductionModule,
+    MaterialsModule,
   ],
   controllers: [AppController],
   providers: [

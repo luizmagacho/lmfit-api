@@ -49,7 +49,7 @@ export class GeminiService {
 
   async parseIntent(text: string): Promise<GeminiIntentResult> {
     const key = this.config.get<string>('GEMINI_API_KEY');
-    const modelId = this.config.get<string>('GEMINI_MODEL') ?? 'gemini-2.0-flash';
+    const modelId = this.config.get<string>('GEMINI_MODEL') ?? 'gemini-2.5-flash';
     if (!key) {
       this.log.warn('GEMINI_API_KEY missing; returning UNKNOWN');
       return {
@@ -86,7 +86,7 @@ export class GeminiService {
     notes: string;
   }> {
     const key = this.config.get<string>('GEMINI_API_KEY');
-    const modelId = this.config.get<string>('GEMINI_MODEL') ?? 'gemini-2.0-flash';
+    const modelId = this.config.get<string>('GEMINI_MODEL') ?? 'gemini-2.5-flash';
     if (!key) {
       return {
         category: 'other',
@@ -114,5 +114,66 @@ export class GeminiService {
       confidence: number;
       notes: string;
     };
+  }
+
+  async parseInfinitePayPdf(text: string): Promise<any[]> {
+    const key = this.config.get<string>('GEMINI_API_KEY');
+    const modelId = this.config.get<string>('GEMINI_MODEL') ?? 'gemini-2.5-flash';
+    if (!key) {
+      throw new Error('GEMINI_API_KEY is not configured');
+    }
+    const genAI = new GoogleGenerativeAI(key);
+    const model = genAI.getGenerativeModel({ model: modelId });
+
+    const prompt = `You are a financial parsing AI. Extract ALL transactions from the following raw text from an InfinitePay "Relatório de Movimentações" PDF.
+Reply ONLY with a valid JSON array of objects. No markdown formatting.
+Each object must match this schema exactly:
+{
+  "date": "YYYY-MM-DD",
+  "hour": "HH:MM",
+  "type": "deposit_sales" | "pix_received" | "pix_sent" | "other",
+  "name": "Nome da pessoa ou empresa (or empty string)",
+  "detail": "Detalhe da transação (or empty string)",
+  "amount": number (positive for credit, negative for debit)
+}
+Rules:
+- Parse the dates written in Brazilian Portuguese (e.g., "16 Abr, 2026" becomes "2026-04-16").
+- Determine 'type' logically (e.g. "Depósito de vendas" -> "deposit_sales", "Pix recebido" -> "pix_received").
+- Convert the monetary value accurately to a number.
+    
+Raw PDF Text:
+${text}`;
+
+    const res = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        maxOutputTokens: 8192,
+        responseMimeType: "application/json"
+      }
+    });
+    
+    let out = res.response.text().trim();
+    const jsonStart = out.indexOf('[');
+    const jsonEnd = out.lastIndexOf(']');
+    if (jsonStart >= 0 && jsonEnd > jsonStart) {
+      out = out.slice(jsonStart, jsonEnd + 1);
+    }
+    
+    try {
+      return JSON.parse(out) as any[];
+    } catch (e) {
+      // Try to repair truncated JSON array if it hit the token limit
+      try {
+        const lastValidBrace = out.lastIndexOf('}');
+        if (lastValidBrace > 0) {
+          const repaired = out.slice(0, lastValidBrace + 1) + ']';
+          return JSON.parse(repaired) as any[];
+        }
+      } catch (e2) {
+        // Fallback to error logging
+      }
+      this.log.error('Failed to parse Gemini output as JSON array', out);
+      throw new Error('Failed to parse PDF with Gemini');
+    }
   }
 }

@@ -2,9 +2,20 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsMongoId, IsNumber, IsOptional, Min } from 'class-validator';
 
 export class PurchaseLineInputDto {
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsMongoId()
-  variantId: string;
+  variantId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsMongoId()
+  materialId?: string;
+
+  @ApiPropertyOptional({ description: 'Preço unitário pago pelo item' })
+  @IsOptional()
+  @IsNumber()
+  unitPrice?: number;
 
   @ApiProperty({ description: 'Quantidade pedida ao fornecedor' })
   @IsNumber()

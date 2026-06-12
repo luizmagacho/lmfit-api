@@ -4,10 +4,13 @@ import { ProductionBatch, ProductionBatchSchema } from './schemas/production-bat
 import { ProductionController } from './production.controller';
 import { ProductionService } from './production.service';
 
+import { ProductVariant, ProductVariantSchema } from '../products/schemas/product-variant.schema';
+
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: ProductionBatch.name, schema: ProductionBatchSchema },
+      { name: ProductVariant.name, schema: ProductVariantSchema },
     ]),
   ],
   controllers: [ProductionController],

@@ -10,8 +10,14 @@ const PurchaseLineSchema = new MSchema(
     variantId: {
       type: Types.ObjectId,
       ref: 'ProductVariant',
-      required: true,
+      sparse: true,
     },
+    materialId: {
+      type: Types.ObjectId,
+      ref: 'Material',
+      sparse: true,
+    },
+    unitPrice: { type: Number, default: 0 },
     quantityOrdered: { type: Number, required: true, min: 1 },
     quantityReceived: { type: Number, default: 0, min: 0 },
   },
@@ -37,7 +43,9 @@ export class Purchase {
 
   @Prop({ type: [PurchaseLineSchema], default: [] })
   lines: Array<{
-    variantId: Types.ObjectId;
+    variantId?: Types.ObjectId;
+    materialId?: Types.ObjectId;
+    unitPrice: number;
     quantityOrdered: number;
     quantityReceived: number;
   }>;
