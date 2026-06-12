@@ -16,17 +16,21 @@ import {
   purchaseImportHeaderAliases,
 } from './purchase-excel.constants';
 import { Purchase } from './schemas/purchase.schema';
+import { ProductVariant } from '../products/schemas/product-variant.schema';
+import { Material } from '../materials/schemas/material.schema';
 
 @Injectable()
 export class PurchasesService {
   constructor(
     @InjectModel(Purchase.name) private readonly model: Model<Purchase>,
+    @InjectModel(ProductVariant.name) private readonly variantModel: Model<ProductVariant>,
+    @InjectModel(Material.name) private readonly materialModel: Model<Material>,
     private readonly excel: ExcelSpreadsheetService,
   ) {}
 
   async create(dto: CreatePurchaseDto, createdBy?: string) {
     const lines = this.normalizePurchaseLines(dto.lines);
-    return this.model.create({
+    const doc = await this.model.create({
       supplierId: new Types.ObjectId(dto.supplierId),
       status: dto.status ?? 'interest',
       reference: dto.reference,
@@ -35,6 +39,10 @@ export class PurchasesService {
       lines,
       createdBy: createdBy ? new Types.ObjectId(createdBy) : undefined,
     });
+    if (doc.status === 'received') {
+      await this.adjustStock(doc, 1);
+    }
+    return doc;
   }
 
   private normalizePurchaseLines(
@@ -42,7 +50,9 @@ export class PurchasesService {
   ): Purchase['lines'] {
     if (!lines?.length) return [];
     return lines.map((l) => ({
-      variantId: new Types.ObjectId(l.variantId),
+      variantId: l.variantId ? new Types.ObjectId(l.variantId) : undefined,
+      materialId: l.materialId ? new Types.ObjectId(l.materialId) : undefined,
+      unitPrice: l.unitPrice ?? 0,
       quantityOrdered: l.quantityOrdered,
       quantityReceived: l.quantityReceived ?? 0,
     }));
@@ -320,6 +330,25 @@ export class PurchasesService {
     return doc;
   }
 
+  
+  private async adjustStock(doc: Purchase, multiplier: number) {
+    if (!doc.lines?.length) return;
+    for (const line of doc.lines) {
+      const qty = (line.quantityReceived || 0) * multiplier;
+      if (qty === 0) continue;
+      if (line.variantId) {
+        await this.variantModel.updateOne(
+          { _id: line.variantId },
+          { $inc: { quantityOnHand: qty } }
+        ).exec();
+      } else if (line.materialId) {
+        await this.materialModel.updateOne(
+          { _id: line.materialId },
+          { $inc: { quantityOnHand: qty } }
+        ).exec();
+      }
+    }
+  }
   async update(id: string, dto: UpdatePurchaseDto) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
     const payload: Record<string, unknown> = {};
@@ -330,16 +359,27 @@ export class PurchasesService {
     if (dto.lines !== undefined) {
       payload.lines = this.normalizePurchaseLines(dto.lines);
     }
-    const doc = await this.model
-      .findByIdAndUpdate(id, payload, { new: true })
-      .lean()
-      .exec();
+    const oldDoc = await this.model.findById(id).lean().exec();
+    if (!oldDoc) throw new NotFoundException();
+    if (oldDoc.status === 'received') {
+      await this.adjustStock(oldDoc as any, -1);
+    }
+    
+    const doc = await this.model.findByIdAndUpdate(id, payload, { new: true }).lean().exec();
     if (!doc) throw new NotFoundException();
+    
+    if (doc.status === 'received') {
+      await this.adjustStock(doc as any, 1);
+    }
     return doc;
   }
 
   async remove(id: string) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
+    const oldDoc = await this.model.findById(id).lean().exec();
+    if (oldDoc && oldDoc.status === 'received') {
+      await this.adjustStock(oldDoc as any, -1);
+    }
     const res = await this.model.findByIdAndDelete(id).exec();
     if (!res) throw new NotFoundException();
     return { deleted: true };

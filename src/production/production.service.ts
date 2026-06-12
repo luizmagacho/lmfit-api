@@ -5,12 +5,15 @@ import { ProductionBatch } from './schemas/production-batch.schema';
 import type { CreateProductionBatchDto } from './dto/create-production-batch.dto';
 import type { UpdateProductionBatchDto } from './dto/update-production-batch.dto';
 import { skipFromPage } from '../common/dto/pagination-query.dto';
+import { ProductVariant } from '../products/schemas/product-variant.schema';
 
 @Injectable()
 export class ProductionService {
   constructor(
     @InjectModel(ProductionBatch.name)
     private readonly model: Model<ProductionBatch>,
+    @InjectModel(ProductVariant.name)
+    private readonly variantModel: Model<ProductVariant>,
   ) {}
 
   /**
@@ -20,6 +23,17 @@ export class ProductionService {
    *   costPerUnit     = totalBatchCost / batchQty
    *   suggestedPrice  = costPerUnit / (1 - targetMarginPercent/100)
    */
+  
+  private async adjustStock(doc: ProductionBatch, multiplier: number) {
+    if (!doc.sku || !doc.batchQty) return;
+    const qty = doc.batchQty * multiplier;
+    if (qty === 0) return;
+    await this.variantModel.updateOne(
+      { sku: doc.sku },
+      { $inc: { quantityOnHand: qty } }
+    ).exec();
+  }
+
   private computeCosts(dto: Partial<CreateProductionBatchDto>): {
     totalInputsCost: number;
     totalBatchCost: number;
@@ -52,7 +66,7 @@ export class ProductionService {
 
   async create(dto: CreateProductionBatchDto) {
     const computed = this.computeCosts(dto);
-    return this.model.create({
+    const doc = await this.model.create({
       name: dto.name,
       sku: dto.sku,
       batchQty: dto.batchQty,
@@ -69,6 +83,10 @@ export class ProductionService {
       dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
       ...computed,
     });
+    if (doc.status === 'Concluído' || doc.status === 'Pronto') {
+      await this.adjustStock(doc as any, 1);
+    }
+    return doc;
   }
 
   async findAll(page: number, limit: number, search?: string, status?: string) {
@@ -146,15 +164,26 @@ export class ProductionService {
     if (dto.notes !== undefined) payload.notes = dto.notes;
     if (dto.dueDate !== undefined) payload.dueDate = new Date(dto.dueDate);
 
-    const doc = await this.model
-      .findByIdAndUpdate(id, payload, { new: true })
-      .lean()
-      .exec();
+    const oldDoc = await this.model.findById(id).lean().exec();
+    if (!oldDoc) throw new NotFoundException('Lote de produção não encontrado');
+    if (oldDoc.status === 'Concluído' || oldDoc.status === 'Pronto') {
+      await this.adjustStock(oldDoc as any, -1);
+    }
+
+    const doc = await this.model.findByIdAndUpdate(id, payload, { new: true }).lean().exec();
     if (!doc) throw new NotFoundException();
+
+    if (doc.status === 'Concluído' || doc.status === 'Pronto') {
+      await this.adjustStock(doc as any, 1);
+    }
     return doc;
   }
 
   async remove(id: string) {
+    const oldDoc = await this.model.findById(id).lean().exec();
+    if (oldDoc && (oldDoc.status === 'Concluído' || oldDoc.status === 'Pronto')) {
+      await this.adjustStock(oldDoc as any, -1);
+    }
     const res = await this.model.findByIdAndDelete(id).exec();
     if (!res) throw new NotFoundException();
     return { deleted: true };
