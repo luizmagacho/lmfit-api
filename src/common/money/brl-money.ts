@@ -90,6 +90,11 @@ export function formatMonetaryValuesInJson(node: unknown): unknown {
   if (typeof node !== 'object') return node;
   if ('_bsontype' in node && node._bsontype === 'ObjectID') return String(node);
   if ('_bsontype' in node && node._bsontype === 'ObjectId') return String(node);
+
+  if ('toJSON' in node && typeof (node as any).toJSON === 'function') {
+    node = (node as any).toJSON();
+  }
+
   if (Array.isArray(node)) {
     return node.map((item) => formatMonetaryValuesInJson(item));
   }

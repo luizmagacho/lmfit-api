@@ -2,7 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
-  IsEnum,
+  IsIn,
   IsMongoId,
   IsNumber,
   IsOptional,
@@ -18,10 +18,10 @@ export class CreatePurchaseDto {
   @IsMongoId()
   supplierId: string;
 
-  @ApiPropertyOptional({ enum: ['interest', 'order_reserved', 'in_transit', 'received', 'cancelled'] })
+  @ApiPropertyOptional({ enum: ['pending', 'started', 'completed', 'cancelled'] })
   @IsOptional()
-  @IsEnum(['interest', 'order_reserved', 'in_transit', 'received', 'cancelled'])
-  status?: 'interest' | 'order_reserved' | 'in_transit' | 'received' | 'cancelled';
+  @IsIn(['pending', 'started', 'completed', 'cancelled'])
+  status?: 'pending' | 'started' | 'completed' | 'cancelled';
 
   @ApiPropertyOptional()
   @IsOptional()

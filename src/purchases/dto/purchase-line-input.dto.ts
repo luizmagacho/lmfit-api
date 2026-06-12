@@ -12,6 +12,10 @@ export class PurchaseLineInputDto {
   @IsMongoId()
   materialId?: string;
 
+  @ApiPropertyOptional()
+  @IsOptional()
+  rawName?: string;
+
   @ApiPropertyOptional({ description: 'Preço unitário pago pelo item' })
   @IsOptional()
   @IsNumber()
