@@ -102,11 +102,69 @@ export class ReportsService {
    * Returns top N products by net line revenue (quantity × unitPrice) from paid/fulfilled orders.
    * Excludes taxes and shipping. Source: orders.lines.
    */
+
+  async salesAndPurchasesDaily(tenantId: string, range: ReportsRange) {
+    const purchaseRows = await this.purchaseModel
+      .aggregate([
+        { $match: { tenantId: new Types.ObjectId(tenantId), createdAt: { $gte: range.from, $lte: range.to } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'UTC' } },
+            purchaseCount: { $sum: 1 },
+            totalPurchases: { $sum: '$total' },
+          },
+        },
+      ])
+      .exec();
+
+    const salesRows = await this.orderModel
+      .aggregate([
+        { $match: { tenantId: new Types.ObjectId(tenantId), createdAt: { $gte: range.from, $lte: range.to }, status: 'completed' } },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'UTC' } },
+            orderCount: { $sum: 1 },
+            totalSales: { $sum: '$total' },
+          },
+        },
+      ])
+      .exec();
+
+    const byDate = new Map();
+    for (const r of purchaseRows) {
+      byDate.set(r._id, { date: r._id, purchaseCount: r.purchaseCount, totalPurchases: Math.round(r.totalPurchases * 100) / 100, orderCount: 0, totalSales: 0 });
+    }
+    for (const r of salesRows) {
+      if (!byDate.has(r._id)) {
+        byDate.set(r._id, { date: r._id, purchaseCount: 0, totalPurchases: 0, orderCount: 0, totalSales: 0 });
+      }
+      const entry = byDate.get(r._id);
+      entry.orderCount = r.orderCount;
+      entry.totalSales = Math.round(r.totalSales * 100) / 100;
+    }
+
+    const points = [];
+    const cursor = new Date(Date.UTC(range.from.getUTCFullYear(), range.from.getUTCMonth(), range.from.getUTCDate()));
+    const end = new Date(Date.UTC(range.to.getUTCFullYear(), range.to.getUTCMonth(), range.to.getUTCDate()));
+    
+    while (cursor <= end) {
+      const dateStr = cursor.toISOString().slice(0, 10);
+      const hit = byDate.get(dateStr);
+      points.push(hit ?? { date: dateStr, purchaseCount: 0, totalPurchases: 0, orderCount: 0, totalSales: 0 });
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    return {
+      range: { from: range.from.toISOString(), to: range.to.toISOString() },
+      points,
+    };
+  }
+
   async revenueByProduct(tenantId: string, range: ReportsRange, limit = 10) {
     const matchPaid = {
       tenantId: new Types.ObjectId(tenantId),
       createdAt: { $gte: range.from, $lte: range.to },
-      status: { $in: ['paid', 'fulfilled'] as const },
+      status: { $in: ['completed'] as const },
     };
     const rows = await this.orderModel
       .aggregate<{ _id: Types.ObjectId; revenue: number; units: number }>([
@@ -171,7 +229,7 @@ export class ReportsService {
     const matchPaid = {
       tenantId: new Types.ObjectId(tenantId),
       createdAt: { $gte: from, $lte: to },
-      status: { $in: ['paid', 'fulfilled'] as const },
+      status: { $in: ['completed'] as const },
     };
     const [agg] = await this.orderModel
       .aggregate<{ total: number; count: number }>([
@@ -200,7 +258,7 @@ export class ReportsService {
     const matchPaid = {
       tenantId: new Types.ObjectId(tenantId),
       createdAt: { $gte: range.from, $lte: range.to },
-      status: { $in: ['paid', 'fulfilled'] as const },
+      status: { $in: ['completed'] as const },
     };
     const rows = await this.orderModel
       .aggregate<{
@@ -281,7 +339,7 @@ export class ReportsService {
     const matchPaid = {
       tenantId: new Types.ObjectId(tenantId),
       createdAt: { $gte: range.from, $lte: range.to },
-      status: { $in: ['paid', 'fulfilled'] as const },
+      status: { $in: ['completed'] as const },
     };
 
     const [revenueAgg] = await this.orderModel
@@ -382,7 +440,7 @@ export class ReportsService {
     const matchPaid = {
       tenantId: new Types.ObjectId(tenantId),
       createdAt: { $gte: range.from, $lte: range.to },
-      status: { $in: ['paid', 'fulfilled'] as const },
+      status: { $in: ['completed'] as const },
     };
     const [revAgg] = await this.orderModel
       .aggregate<{ total: number; count: number }>([

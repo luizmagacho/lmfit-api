@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, Headers, BadRequestException } from '@nestjs/common';
 import { ApiQuery } from '@nestjs/swagger';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -40,6 +40,16 @@ export class ReportsController {
   }
 
   /** Compras por dia. Datas em UTC. Inclui dias sem compras com purchaseCount=0. */
+
+  @Get('sales-and-purchases-daily')
+  salesAndPurchasesDaily(@Headers('x-tenant-id') tenantId: string, @Query() q: ReportsQueryDto) {
+    if (!tenantId) throw new BadRequestException('x-tenant-id missing');
+    return this.reports.salesAndPurchasesDaily(tenantId, {
+      from: new Date(q.from),
+      to: new Date(q.to),
+    });
+  }
+
   @Get('purchases-daily')
   purchasesDaily(@TenantId() tenantId: string, @Query() q: ReportsQueryDto) {
     return this.reports.purchasesDaily(tenantId, {
