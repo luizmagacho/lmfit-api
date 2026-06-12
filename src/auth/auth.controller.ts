@@ -8,9 +8,11 @@ import type { JwtUserPayload } from './jwt-user.payload';
 import { LoginDto } from './dto/login.dto';
 import { TenantId } from '../common/decorators/tenant-id.decorator';
 import { RefreshDto } from './dto/refresh.dto';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 
 @ApiTags('auth')
 @Controller('auth')
+@SkipSubscriptionCheck()
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 

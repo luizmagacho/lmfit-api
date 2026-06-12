@@ -86,6 +86,16 @@ export class Tenant {
 
   @Prop({ trim: true })
   infinitePayApiKey?: string;
+
+  /* Stripe Fields */
+  @Prop({ trim: true })
+  stripeCustomerId?: string;
+
+  @Prop({ trim: true })
+  stripeSubscriptionId?: string;
+
+  @Prop({ trim: true })
+  stripeSubscriptionStatus?: string;
 }
 
 export const TenantSchema = SchemaFactory.createForClass(Tenant);

@@ -19,6 +19,8 @@ import { UpdateBrandingDto } from './dto/update-branding.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { TenantsService } from './tenants.service';
 
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
+
 /* ------------------------------------------------------------------ */
 /*  Protected routes (admin only)                                     */
 /* ------------------------------------------------------------------ */
@@ -28,6 +30,7 @@ import { TenantsService } from './tenants.service';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('admin')
 @Controller('tenants')
+@SkipSubscriptionCheck()
 export class TenantsController {
   constructor(private readonly tenants: TenantsService) {}
 

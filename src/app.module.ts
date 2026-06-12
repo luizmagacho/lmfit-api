@@ -27,6 +27,8 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { CashflowModule } from './cashflow/cashflow.module';
 import { ProductionModule } from './production/production.module';
 import { MaterialsModule } from './materials/materials.module';
+import { BillingModule } from './billing/billing.module';
+import { TenantSubscriptionGuard } from './common/guards/tenant-subscription.guard';
 
 @Module({
   imports: [
@@ -61,12 +63,17 @@ import { MaterialsModule } from './materials/materials.module';
     CashflowModule,
     ProductionModule,
     MaterialsModule,
+    BillingModule,
   ],
   controllers: [AppController],
   providers: [
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: TenantSubscriptionGuard,
     },
   ],
 })
