@@ -61,6 +61,10 @@ export class CashflowEntry {
   @Prop({ type: Types.ObjectId, ref: 'Customer', index: true, sparse: true })
   customerId?: Types.ObjectId;
 
+  /** Linked supplier */
+  @Prop({ type: Types.ObjectId, ref: 'Supplier', index: true, sparse: true })
+  supplierId?: Types.ObjectId;
+
   /** Linked order */
   @Prop({ type: Types.ObjectId, ref: 'Order', index: true, sparse: true })
   orderId?: Types.ObjectId;

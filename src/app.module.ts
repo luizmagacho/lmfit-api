@@ -1,5 +1,5 @@
 import { join } from 'path';
-import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -11,7 +11,6 @@ import { AppController } from './app.controller';
 import { AuthModule } from './auth/auth.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { ExcelModule } from './common/excel/excel.module';
-import { TenantMiddleware } from './common/middleware/tenant.middleware';
 import { CustomersModule } from './customers/customers.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { JwtRegisteredModule } from './jwt/jwt-registered.module';
@@ -27,7 +26,7 @@ import { UsersModule } from './users/users.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { CashflowModule } from './cashflow/cashflow.module';
 import { ProductionModule } from './production/production.module';
-import { TenantsModule } from './tenants/tenants.module';
+import { MaterialsModule } from './materials/materials.module';
 
 @Module({
   imports: [
@@ -41,11 +40,10 @@ import { TenantsModule } from './tenants/tenants.module';
     ThrottlerModule.forRoot([
       { name: 'default', ttl: 60_000, limit: 120 },
     ]),
-    MongooseModule.forRoot(process.env.MONGODB_URI ?? 'mongodb://127.0.0.1:27017/kivoni'),
+    MongooseModule.forRoot(process.env.MONGODB_URI ?? 'mongodb://127.0.0.1:27017/lmfit'),
     ExcelModule,
     JwtRegisteredModule,
     NotificationsModule,
-    TenantsModule,
     UsersModule,
     SeedModule,
     AuthModule,
@@ -62,6 +60,7 @@ import { TenantsModule } from './tenants/tenants.module';
     WhatsappModule,
     CashflowModule,
     ProductionModule,
+    MaterialsModule,
   ],
   controllers: [AppController],
   providers: [
@@ -71,9 +70,4 @@ import { TenantsModule } from './tenants/tenants.module';
     },
   ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer) {
-    consumer.apply(TenantMiddleware).forRoutes('*');
-  }
-}
-
+export class AppModule {}

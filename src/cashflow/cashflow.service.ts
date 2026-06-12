@@ -73,6 +73,8 @@ export class CashflowService {
       amount: dto.amount,
       source: 'manual',
       importBatch: 'manual',
+      customerId: dto.customerId ? new Types.ObjectId(dto.customerId) : undefined,
+      supplierId: dto.supplierId ? new Types.ObjectId(dto.supplierId) : undefined,
       createdBy: createdById ? new Types.ObjectId(createdById) : undefined,
     });
     return doc;
@@ -86,6 +88,8 @@ export class CashflowService {
     if (dto.name !== undefined) patch.name = dto.name;
     if (dto.detail !== undefined) patch.detail = dto.detail;
     if (dto.amount !== undefined) patch.amount = dto.amount;
+    if (dto.customerId !== undefined) patch.customerId = dto.customerId ? new Types.ObjectId(dto.customerId) : null;
+    if (dto.supplierId !== undefined) patch.supplierId = dto.supplierId ? new Types.ObjectId(dto.supplierId) : null;
 
     const doc = await this.model.findOneAndUpdate(
       { _id: id, tenantId: new Types.ObjectId(tenantId) },

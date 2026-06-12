@@ -23,6 +23,7 @@ import { CreateCashflowImportDto } from './dto/create-cashflow-import.dto';
 import { CreateCashflowEntryDto } from './dto/create-cashflow-entry.dto';
 import { UpdateCashflowEntryDto } from './dto/update-cashflow-entry.dto';
 import { CashflowService } from './cashflow.service';
+import { GeminiService } from '../gemini/gemini.service';
 
 @ApiTags('cashflow')
 @ApiBearerAuth()
@@ -31,7 +32,25 @@ import { CashflowService } from './cashflow.service';
 @Roles('admin', 'staff')
 @Controller('cashflow')
 export class CashflowController {
-  constructor(private readonly cashflow: CashflowService) {}
+  constructor(
+    private readonly cashflow: CashflowService,
+    private readonly gemini: GeminiService,
+  ) {}
+
+  /** Import a parsed InfinitePay batch using AI */
+  @Post('import/ai/parse')
+  async parseAi(
+    @Body() body: { text: string; periodFrom?: string; periodTo?: string; cnpj?: string; companyName?: string },
+  ) {
+    const transactions = await this.gemini.parseInfinitePayPdf(body.text);
+    return {
+      periodFrom: body.periodFrom,
+      periodTo: body.periodTo,
+      cnpj: body.cnpj,
+      companyName: body.companyName,
+      transactions,
+    };
+  }
 
   /** Import a parsed InfinitePay batch */
   @Post('import')

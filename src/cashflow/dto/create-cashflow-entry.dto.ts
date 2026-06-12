@@ -29,4 +29,14 @@ export class CreateCashflowEntryDto {
   @ApiProperty()
   @IsNumber()
   amount: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  customerId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  supplierId?: string;
 }

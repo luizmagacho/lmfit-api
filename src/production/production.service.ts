@@ -1,16 +1,19 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model } from 'mongoose';
 import { ProductionBatch } from './schemas/production-batch.schema';
 import type { CreateProductionBatchDto } from './dto/create-production-batch.dto';
 import type { UpdateProductionBatchDto } from './dto/update-production-batch.dto';
 import { skipFromPage } from '../common/dto/pagination-query.dto';
+import { ProductVariant } from '../products/schemas/product-variant.schema';
 
 @Injectable()
 export class ProductionService {
   constructor(
     @InjectModel(ProductionBatch.name)
     private readonly model: Model<ProductionBatch>,
+    @InjectModel(ProductVariant.name)
+    private readonly variantModel: Model<ProductVariant>,
   ) {}
 
   /**
@@ -20,6 +23,17 @@ export class ProductionService {
    *   costPerUnit     = totalBatchCost / batchQty
    *   suggestedPrice  = costPerUnit / (1 - targetMarginPercent/100)
    */
+  
+  private async adjustStock(doc: ProductionBatch, multiplier: number) {
+    if (!doc.sku || !doc.batchQty) return;
+    const qty = doc.batchQty * multiplier;
+    if (qty === 0) return;
+    await this.variantModel.updateOne(
+      { sku: doc.sku },
+      { $inc: { quantityOnHand: qty } }
+    ).exec();
+  }
+
   private computeCosts(dto: Partial<CreateProductionBatchDto>): {
     totalInputsCost: number;
     totalBatchCost: number;
@@ -50,10 +64,9 @@ export class ProductionService {
     };
   }
 
-  async create(tenantId: string, dto: CreateProductionBatchDto) {
+  async create(dto: CreateProductionBatchDto) {
     const computed = this.computeCosts(dto);
-    return this.model.create({
-      tenantId: new Types.ObjectId(tenantId),
+    const doc = await this.model.create({
       name: dto.name,
       sku: dto.sku,
       batchQty: dto.batchQty,
@@ -71,13 +84,15 @@ export class ProductionService {
       dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
       ...computed,
     });
+    if (doc.status === 'Concluído' || doc.status === 'Pronto') {
+      await this.adjustStock(doc as any, 1);
+    }
+    return doc;
   }
 
-  async findAll(tenantId: string, page: number, limit: number, search?: string, status?: string) {
+  async findAll(page: number, limit: number, search?: string, status?: string) {
     const skip = skipFromPage(page, limit);
-    const q: Record<string, unknown> = {
-      tenantId: new Types.ObjectId(tenantId),
-    };
+    const q: Record<string, unknown> = {};
     if (status) q.status = status;
     if (search) {
       q.$or = [
@@ -94,12 +109,8 @@ export class ProductionService {
   }
 
   /** Retorna todos os lotes agrupados por status (para o Kanban) */
-  async findKanban(tenantId: string) {
-    const all = await this.model
-      .find({ tenantId: new Types.ObjectId(tenantId) })
-      .sort({ createdAt: -1 })
-      .lean()
-      .exec();
+  async findKanban() {
+    const all = await this.model.find().sort({ createdAt: -1 }).lean().exec();
     const grouped: Record<string, typeof all> = {};
     for (const batch of all) {
       const s = batch.status ?? 'Planejado';
@@ -110,27 +121,19 @@ export class ProductionService {
   }
 
   /** Lista todos os status distintos existentes */
-  async getDistinctStatuses(tenantId: string): Promise<string[]> {
-    const statuses = await this.model
-      .distinct('status', { tenantId: new Types.ObjectId(tenantId) })
-      .exec() as string[];
+  async getDistinctStatuses(): Promise<string[]> {
+    const statuses = await this.model.distinct('status').exec() as string[];
     return statuses.sort();
   }
 
-  async findOne(tenantId: string, id: string) {
-    const doc = await this.model
-      .findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) })
-      .lean()
-      .exec();
+  async findOne(id: string) {
+    const doc = await this.model.findById(id).lean().exec();
     if (!doc) throw new NotFoundException('Lote de produção não encontrado');
     return doc;
   }
 
-  async update(tenantId: string, id: string, dto: UpdateProductionBatchDto) {
-    const existing = await this.model
-      .findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) })
-      .lean()
-      .exec();
+  async update(id: string, dto: UpdateProductionBatchDto) {
+    const existing = await this.model.findById(id).lean().exec();
     if (!existing) throw new NotFoundException('Lote de produção não encontrado');
 
     // Merge para recalcular custos com dados atualizados
@@ -163,22 +166,27 @@ export class ProductionService {
     if (dto.imageUrl !== undefined) payload.imageUrl = dto.imageUrl;
     if (dto.dueDate !== undefined) payload.dueDate = new Date(dto.dueDate);
 
-    const doc = await this.model
-      .findOneAndUpdate(
-        { _id: id, tenantId: new Types.ObjectId(tenantId) },
-        payload,
-        { new: true }
-      )
-      .lean()
-      .exec();
+    const oldDoc = await this.model.findById(id).lean().exec();
+    if (!oldDoc) throw new NotFoundException('Lote de produção não encontrado');
+    if (oldDoc.status === 'Concluído' || oldDoc.status === 'Pronto') {
+      await this.adjustStock(oldDoc as any, -1);
+    }
+
+    const doc = await this.model.findByIdAndUpdate(id, payload, { new: true }).lean().exec();
     if (!doc) throw new NotFoundException();
+
+    if (doc.status === 'Concluído' || doc.status === 'Pronto') {
+      await this.adjustStock(doc as any, 1);
+    }
     return doc;
   }
 
-  async remove(tenantId: string, id: string) {
-    const res = await this.model
-      .findOneAndDelete({ _id: id, tenantId: new Types.ObjectId(tenantId) })
-      .exec();
+  async remove(id: string) {
+    const oldDoc = await this.model.findById(id).lean().exec();
+    if (oldDoc && (oldDoc.status === 'Concluído' || oldDoc.status === 'Pronto')) {
+      await this.adjustStock(oldDoc as any, -1);
+    }
+    const res = await this.model.findByIdAndDelete(id).exec();
     if (!res) throw new NotFoundException();
     return { deleted: true };
   }
@@ -187,19 +195,14 @@ export class ProductionService {
    * Retorna o custo médio por peça ponderado de todos os lotes no período,
    * e o CMV total estimado (usado pelo DRE).
    */
-  async getCmvSummary(tenantId: string, from: Date, to: Date) {
+  async getCmvSummary(from: Date, to: Date) {
     const rows = await this.model
       .aggregate<{
         totalBatchCost: number;
         totalUnits: number;
         batchCount: number;
       }>([
-        {
-          $match: {
-            tenantId: new Types.ObjectId(tenantId),
-            createdAt: { $gte: from, $lte: to },
-          },
-        },
+        { $match: { createdAt: { $gte: from, $lte: to } } },
         {
           $group: {
             _id: null,
