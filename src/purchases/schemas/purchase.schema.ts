@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Schema as MSchema, Types } from 'mongoose';
 
-export type PurchaseStatus = 'interest' | 'order_reserved' | 'in_transit' | 'received' | 'cancelled';
+export type PurchaseStatus = 'pending' | 'started' | 'completed' | 'cancelled';
 
 export type PurchaseDocument = HydratedDocument<Purchase>;
 
@@ -17,6 +17,7 @@ const PurchaseLineSchema = new MSchema(
       ref: 'Material',
       sparse: true,
     },
+    rawName: { type: String, trim: true },
     unitPrice: { type: Number, default: 0 },
     quantityOrdered: { type: Number, required: true, min: 1 },
     quantityReceived: { type: Number, default: 0, min: 0 },
@@ -32,7 +33,7 @@ export class Purchase {
   @Prop({ type: Types.ObjectId, ref: 'Supplier', required: true })
   supplierId: Types.ObjectId;
 
-  @Prop({ type: String, enum: ['interest', 'order_reserved', 'in_transit', 'received', 'cancelled'], default: 'interest' })
+  @Prop({ type: String, enum: ['pending', 'started', 'completed', 'cancelled'], default: 'pending' })
   status: PurchaseStatus;
 
   @Prop({ trim: true })
@@ -48,6 +49,7 @@ export class Purchase {
   lines: Array<{
     variantId?: Types.ObjectId;
     materialId?: Types.ObjectId;
+    rawName?: string;
     unitPrice: number;
     quantityOrdered: number;
     quantityReceived: number;

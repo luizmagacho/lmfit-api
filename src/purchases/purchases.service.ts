@@ -32,14 +32,14 @@ export class PurchasesService {
     const lines = this.normalizePurchaseLines(dto.lines);
     const doc = await this.model.create({
       supplierId: new Types.ObjectId(dto.supplierId),
-      status: dto.status ?? 'interest',
+      status: dto.status ?? 'pending',
       reference: dto.reference,
       total: dto.total ?? 0,
       notes: dto.notes,
       lines,
       createdBy: createdBy ? new Types.ObjectId(createdBy) : undefined,
     });
-    if (doc.status === 'received') {
+    if (doc.status === 'completed') {
       await this.adjustStock(doc, 1);
     }
     return doc;
@@ -52,6 +52,7 @@ export class PurchasesService {
     return lines.map((l) => ({
       variantId: l.variantId ? new Types.ObjectId(l.variantId) : undefined,
       materialId: l.materialId ? new Types.ObjectId(l.materialId) : undefined,
+      rawName: l.rawName,
       unitPrice: l.unitPrice ?? 0,
       quantityOrdered: l.quantityOrdered,
       quantityReceived: l.quantityReceived ?? 0,
@@ -68,7 +69,7 @@ export class PurchasesService {
     if (!variantIds.length) return map;
     const rows = await this.model
       .aggregate<{ _id: Types.ObjectId; qty: number }>([
-        { $match: { status: { $in: ['interest', 'order_reserved', 'in_transit'] } } },
+        { $match: { status: { $in: ['pending', 'started'] } } },
         { $unwind: '$lines' },
         { $match: { 'lines.variantId': { $in: variantIds } } },
         {
@@ -191,8 +192,8 @@ export class PurchasesService {
     }
     const st = String(row.status ?? '').trim();
     const status =
-      st && ['interest', 'order_reserved', 'in_transit', 'received', 'cancelled'].includes(st)
-        ? (st as 'interest' | 'order_reserved' | 'in_transit' | 'received' | 'cancelled')
+      st && ['pending', 'started', 'completed', 'cancelled'].includes(st)
+        ? (st as 'pending' | 'started' | 'completed' | 'cancelled')
         : undefined;
     const lines = this.parseLinesCell(row.lines);
     const patch: UpdatePurchaseDto = {
@@ -361,14 +362,14 @@ export class PurchasesService {
     }
     const oldDoc = await this.model.findById(id).lean().exec();
     if (!oldDoc) throw new NotFoundException();
-    if (oldDoc.status === 'received') {
+    if (oldDoc.status === 'completed') {
       await this.adjustStock(oldDoc as any, -1);
     }
     
     const doc = await this.model.findByIdAndUpdate(id, payload, { new: true }).lean().exec();
     if (!doc) throw new NotFoundException();
     
-    if (doc.status === 'received') {
+    if (doc.status === 'completed') {
       await this.adjustStock(doc as any, 1);
     }
     return doc;
@@ -377,7 +378,7 @@ export class PurchasesService {
   async remove(id: string) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
     const oldDoc = await this.model.findById(id).lean().exec();
-    if (oldDoc && oldDoc.status === 'received') {
+    if (oldDoc && oldDoc.status === 'completed') {
       await this.adjustStock(oldDoc as any, -1);
     }
     const res = await this.model.findByIdAndDelete(id).exec();
