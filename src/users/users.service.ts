@@ -20,8 +20,9 @@ export class UsersService {
     private readonly excel: ExcelSpreadsheetService,
   ) {}
 
-  async count(): Promise<number> {
-    return this.userModel.countDocuments().exec();
+  async count(tenantId?: string): Promise<number> {
+    const q = tenantId ? { tenantId: new Types.ObjectId(tenantId) } : {};
+    return this.userModel.countDocuments(q).exec();
   }
 
   /** Maps legacy `finance` / `ops` to `staff` once per deploy. */
@@ -35,44 +36,74 @@ export class UsersService {
     password: string,
     name = 'Admin',
   ): Promise<void> {
-    const n = await this.count();
+    const n = await this.count(undefined);
     if (n > 0) return;
+    const tenantModel = this.userModel.db.model('Tenant');
+    let tenant = await tenantModel.findOne({ slug: 'lmfit' }).exec();
+    if (!tenant) {
+      tenant = await tenantModel.create({
+        slug: 'lmfit',
+        name: 'LMFit Store',
+        active: true,
+        plan: 'enterprise',
+        branding: {
+          logoUrl: 'https://d1a9qnv764bsoo.cloudfront.net/stores/006/316/201/themes/common/logo-813858800-1750428827-d18edfd75754df23704c77cbd129bbc91750428827-1024-1024.webp?w=1400',
+          faviconUrl: 'https://d1a9qnv764bsoo.cloudfront.net/stores/006/316/201/themes/common/logo-813858800-1750428827-d18edfd75754df23704c77cbd129bbc91750428827-1024-1024.webp?w=1400',
+          primaryColor: '#f68006',
+          secondaryColor: '#000000',
+          darkMode: false,
+        },
+      });
+    }
     const passwordHash = await argon2.hash(password);
     await this.userModel.create({
       email: email.toLowerCase(),
       passwordHash,
       name,
       role: 'admin' as UserRole,
+      tenantId: tenant._id,
     });
   }
 
-  async findByEmail(email: string): Promise<UserDocument | null> {
-    return this.userModel.findOne({ email: email.toLowerCase() }).exec();
+  async findByEmail(tenantId: string | undefined, email: string): Promise<UserDocument | null> {
+    const q: Record<string, any> = { email: email.toLowerCase() };
+    if (tenantId) {
+      q.tenantId = new Types.ObjectId(tenantId);
+    }
+    return this.userModel.findOne(q).exec();
   }
 
-  async findById(id: string): Promise<UserDocument | null> {
+  async findById(tenantId: string | undefined, id: string): Promise<UserDocument | null> {
     if (!Types.ObjectId.isValid(id)) return null;
-    return this.userModel.findById(id).exec();
+    const q: Record<string, any> = { _id: new Types.ObjectId(id) };
+    if (tenantId) {
+      q.tenantId = new Types.ObjectId(tenantId);
+    }
+    return this.userModel.findOne(q).exec();
   }
 
-  async findByIdPublic(id: string) {
+  async findByIdPublic(tenantId: string, id: string) {
     if (!Types.ObjectId.isValid(id)) return null;
-    return this.userModel.findById(id).select('-passwordHash').lean().exec();
+    return this.userModel
+      .findOne({ _id: new Types.ObjectId(id), tenantId: new Types.ObjectId(tenantId) })
+      .select('-passwordHash')
+      .lean()
+      .exec();
   }
 
-  private listFilter(search?: string) {
-    return search
-      ? {
-          $or: [
-            { name: new RegExp(search, 'i') },
-            { email: new RegExp(search, 'i') },
-          ],
-        }
-      : {};
+  private listFilter(tenantId: string, search?: string) {
+    const base: Record<string, any> = { tenantId: new Types.ObjectId(tenantId) };
+    if (search) {
+      base.$or = [
+        { name: new RegExp(search, 'i') },
+        { email: new RegExp(search, 'i') },
+      ];
+    }
+    return base;
   }
 
-  async list(skip: number, limit: number, search?: string) {
-    const q = this.listFilter(search);
+  async list(tenantId: string, skip: number, limit: number, search?: string) {
+    const q = this.listFilter(tenantId, search);
     const [items, total] = await Promise.all([
       this.userModel
         .find(q)
@@ -87,8 +118,8 @@ export class UsersService {
     return { items, total };
   }
 
-  async findAllForExport(search?: string) {
-    const q = this.listFilter(search);
+  async findAllForExport(tenantId: string, search?: string) {
+    const q = this.listFilter(tenantId, search);
     return this.userModel
       .find(q)
       .sort({ createdAt: -1 })
@@ -107,10 +138,11 @@ export class UsersService {
   }
 
   async exportBuffer(
+    tenantId: string,
     format: 'xlsx' | 'csv',
     search?: string,
   ): Promise<{ buffer: Buffer; filename: string; mime: string }> {
-    const docs = await this.findAllForExport(search);
+    const docs = await this.findAllForExport(tenantId, search);
     const rows = docs.map((d) =>
       this.serializeUserRow(d as unknown as Record<string, unknown>),
     );
@@ -188,14 +220,16 @@ export class UsersService {
   }
 
   async importFromJson(
+    tenantId: string,
     items: Record<string, unknown>[],
     dryRun: boolean,
     createdBy?: string,
   ): Promise<StaffImportResponse> {
-    return this.importRecords(items, dryRun, createdBy);
+    return this.importRecords(tenantId, items, dryRun, createdBy);
   }
 
   async importFromXlsx(
+    tenantId: string,
     buffer: Buffer,
     dryRun: boolean,
     createdBy?: string,
@@ -204,10 +238,11 @@ export class UsersService {
       buffer,
       userImportHeaderAliases(),
     );
-    return this.importRecords(records, dryRun, createdBy);
+    return this.importRecords(tenantId, records, dryRun, createdBy);
   }
 
   private async importRecords(
+    tenantId: string,
     items: Record<string, unknown>[],
     dryRun: boolean,
     createdBy?: string,
@@ -223,7 +258,10 @@ export class UsersService {
         const { id, create, patch } = this.parseUserRow(items[i]);
         if (dryRun) {
           if (id && Types.ObjectId.isValid(id)) {
-            const exists = await this.userModel.findById(id).lean().exec();
+            const exists = await this.userModel
+              .findOne({ _id: new Types.ObjectId(id), tenantId: new Types.ObjectId(tenantId) })
+              .lean()
+              .exec();
             if (!exists) {
               errors.push({
                 row: rowNum,
@@ -234,7 +272,9 @@ export class UsersService {
           continue;
         }
         if (id && Types.ObjectId.isValid(id)) {
-          const exists = await this.userModel.findById(id).exec();
+          const exists = await this.userModel
+            .findOne({ _id: new Types.ObjectId(id), tenantId: new Types.ObjectId(tenantId) })
+            .exec();
           if (!exists) {
             errors.push({ row: rowNum, message: `_id não encontrado: ${id}` });
             continue;
@@ -243,14 +283,14 @@ export class UsersService {
             skipped++;
             continue;
           }
-          await this.update(id, patch);
+          await this.update(tenantId, id, patch);
           updated++;
         } else {
           if (!create) {
             errors.push({ row: rowNum, message: 'Linha inválida' });
             continue;
           }
-          await this.create({ ...create, createdBy });
+          await this.create(tenantId, { ...create, createdBy });
           imported++;
         }
       } catch (e) {
@@ -290,15 +330,19 @@ export class UsersService {
     };
   }
 
-  async create(data: {
-    email: string;
-    password: string;
-    name: string;
-    role: UserRole;
-    createdBy?: string;
-  }) {
+  async create(
+    tenantId: string,
+    data: {
+      email: string;
+      password: string;
+      name: string;
+      role: UserRole;
+      createdBy?: string;
+    },
+  ) {
     const passwordHash = await argon2.hash(data.password);
     const doc = await this.userModel.create({
+      tenantId: new Types.ObjectId(tenantId),
       email: data.email.toLowerCase(),
       passwordHash,
       name: data.name,
@@ -311,6 +355,7 @@ export class UsersService {
   }
 
   async update(
+    tenantId: string,
     id: string,
     patch: Partial<{ name: string; role: UserRole; password: string }>,
   ) {
@@ -320,7 +365,11 @@ export class UsersService {
     if (patch.role !== undefined) update.role = patch.role;
     if (patch.password) update.passwordHash = await argon2.hash(patch.password);
     const doc = await this.userModel
-      .findByIdAndUpdate(id, update, { new: true })
+      .findOneAndUpdate(
+        { _id: new Types.ObjectId(id), tenantId: new Types.ObjectId(tenantId) },
+        update,
+        { new: true },
+      )
       .select('-passwordHash')
       .lean()
       .exec();
@@ -328,9 +377,11 @@ export class UsersService {
     return doc;
   }
 
-  async remove(id: string) {
+  async remove(tenantId: string, id: string) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException('User not found');
-    const res = await this.userModel.findByIdAndDelete(id).exec();
+    const res = await this.userModel
+      .findOneAndDelete({ _id: new Types.ObjectId(id), tenantId: new Types.ObjectId(tenantId) })
+      .exec();
     if (!res) throw new NotFoundException('User not found');
     return { deleted: true };
   }

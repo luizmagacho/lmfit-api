@@ -22,6 +22,7 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { ImportJsonDto } from '../common/dto/import-json.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { TenantId } from '../common/decorators/tenant-id.decorator';
 import type { JwtUserPayload } from '../auth/jwt-user.payload';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { OrderListQueryDto } from './dto/order-list-query.dto';
@@ -37,17 +38,22 @@ export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
   @Post()
-  create(@Body() dto: CreateOrderDto, @CurrentUser() user: JwtUserPayload) {
-    return this.orders.create(dto, user.sub);
+  create(
+    @TenantId() tenantId: string,
+    @Body() dto: CreateOrderDto,
+    @CurrentUser() user: JwtUserPayload,
+  ) {
+    return this.orders.create(tenantId, dto, user.sub);
   }
 
   @Get()
-  findAll(@Query() q: OrderListQueryDto) {
-    return this.orders.findAll(q.page, q.limit, q.search, q.channel);
+  findAll(@TenantId() tenantId: string, @Query() q: OrderListQueryDto) {
+    return this.orders.findAll(tenantId, q.page, q.limit, q.search, q.channel);
   }
 
   @Get('export')
   async export(
+    @TenantId() tenantId: string,
     @Query('format') format?: string,
     @Query('search') search?: string,
     @Query('channel') channel?: string,
@@ -57,6 +63,7 @@ export class OrdersController {
       throw new BadRequestException({ message: 'format must be xlsx or csv' });
     }
     const { buffer, filename, mime } = await this.orders.exportBuffer(
+      tenantId,
       fmt as 'xlsx' | 'csv',
       search,
       channel,
@@ -73,6 +80,7 @@ export class OrdersController {
     FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024 } }),
   )
   async importStaff(
+    @TenantId() tenantId: string,
     @Req() req: Request,
     @CurrentUser() user: JwtUserPayload,
     @Body() body: ImportJsonDto | Record<string, never>,
@@ -88,10 +96,10 @@ export class OrdersController {
           message: 'JSON body must include items[]',
         });
       }
-      return this.orders.importFromJson(b.items, b.dryRun ?? dryRun, user.sub);
+      return this.orders.importFromJson(tenantId, b.items, b.dryRun ?? dryRun, user.sub);
     }
     if (file?.buffer?.length) {
-      return this.orders.importFromXlsx(file.buffer, dryRun, user.sub);
+      return this.orders.importFromXlsx(tenantId, file.buffer, dryRun, user.sub);
     }
     throw new BadRequestException({
       message:
@@ -100,21 +108,22 @@ export class OrdersController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.orders.findOne(id);
+  findOne(@TenantId() tenantId: string, @Param('id') id: string) {
+    return this.orders.findOne(tenantId, id);
   }
 
   @Patch(':id')
   update(
+    @TenantId() tenantId: string,
     @Param('id') id: string,
     @Body() dto: UpdateOrderDto,
     @CurrentUser() user: JwtUserPayload,
   ) {
-    return this.orders.update(id, dto, user.sub);
+    return this.orders.update(tenantId, id, dto, user.sub);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.orders.remove(id);
+  remove(@TenantId() tenantId: string, @Param('id') id: string) {
+    return this.orders.remove(tenantId, id);
   }
 }

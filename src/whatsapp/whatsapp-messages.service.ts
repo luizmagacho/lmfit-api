@@ -16,6 +16,7 @@ export class WhatsappMessagesService {
   }
 
   async createInbound(input: {
+    tenantId: string;
     wamid: string;
     fromWaId: string;
     type: string;

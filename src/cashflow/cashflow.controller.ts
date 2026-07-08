@@ -15,6 +15,10 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { FeatureGuard } from '../common/guards/feature.guard';
+import { RequireFeature } from '../common/decorators/require-feature.decorator';
+import { Feature } from '../common/enums/feature.enum';
+import { TenantId } from '../common/decorators/tenant-id.decorator';
 import { CreateCashflowImportDto } from './dto/create-cashflow-import.dto';
 import { CreateCashflowEntryDto } from './dto/create-cashflow-entry.dto';
 import { UpdateCashflowEntryDto } from './dto/update-cashflow-entry.dto';
@@ -23,7 +27,8 @@ import { GeminiService } from '../gemini/gemini.service';
 
 @ApiTags('cashflow')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FeatureGuard)
+@RequireFeature(Feature.FINANCIAL)
 @Roles('admin', 'staff')
 @Controller('cashflow')
 export class CashflowController {
@@ -50,38 +55,42 @@ export class CashflowController {
   /** Import a parsed InfinitePay batch */
   @Post('import')
   import(
+    @TenantId() tenantId: string,
     @Body() dto: CreateCashflowImportDto,
     @Req() req: Request & { user?: { sub?: string } },
   ) {
     const userId = req.user?.sub;
-    return this.cashflow.importBatch(dto, userId);
+    return this.cashflow.importBatch(tenantId, dto, userId);
   }
 
   @Post()
   create(
+    @TenantId() tenantId: string,
     @Body() dto: CreateCashflowEntryDto,
     @Req() req: Request & { user?: { sub?: string } },
   ) {
     const userId = req.user?.sub;
-    return this.cashflow.createEntry(dto, userId);
+    return this.cashflow.createEntry(tenantId, dto, userId);
   }
 
   @Patch(':id')
   update(
+    @TenantId() tenantId: string,
     @Param('id') id: string,
     @Body() dto: UpdateCashflowEntryDto,
   ) {
-    return this.cashflow.updateEntry(id, dto);
+    return this.cashflow.updateEntry(tenantId, id, dto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.cashflow.removeEntry(id);
+  remove(@TenantId() tenantId: string, @Param('id') id: string) {
+    return this.cashflow.removeEntry(tenantId, id);
   }
 
   /** List transactions */
   @Get()
   list(
+    @TenantId() tenantId: string,
     @Query('page') page = '1',
     @Query('limit') limit = '50',
     @Query('from') from?: string,
@@ -89,7 +98,7 @@ export class CashflowController {
     @Query('type') type?: string,
     @Query('importBatch') importBatch?: string,
   ) {
-    return this.cashflow.findAll({
+    return this.cashflow.findAll(tenantId, {
       page: Math.max(1, Number(page)),
       limit: Math.min(200, Math.max(1, Number(limit))),
       from,
@@ -101,38 +110,42 @@ export class CashflowController {
 
   /** Aggregated KPIs for a date range */
   @Get('summary')
-  summary(@Query('from') from?: string, @Query('to') to?: string) {
-    return this.cashflow.summary(from, to);
+  summary(
+    @TenantId() tenantId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.cashflow.summary(tenantId, from, to);
   }
 
   /** List import batches */
   @Get('batches')
-  batches() {
-    return this.cashflow.listBatches();
+  batches(@TenantId() tenantId: string) {
+    return this.cashflow.listBatches(tenantId);
   }
 
   /** Delete an entire import batch */
   @Delete('batches/:batchId')
-  removeBatch(@Param('batchId') batchId: string) {
-    return this.cashflow.removeBatch(batchId);
+  removeBatch(@TenantId() tenantId: string, @Param('batchId') batchId: string) {
+    return this.cashflow.removeBatch(tenantId, batchId);
   }
 
   /** Trigger AI analysis for a single entry */
   @Post(':id/analyze')
-  analyzeOne(@Param('id') id: string) {
-    return this.cashflow.analyzeEntry(id);
+  analyzeOne(@TenantId() tenantId: string, @Param('id') id: string) {
+    return this.cashflow.analyzeEntry(tenantId, id);
   }
 
   /** Trigger AI analysis for all entries of a batch */
   @Post('batches/:batchId/analyze')
-  async analyzeBatch(@Param('batchId') batchId: string) {
-    const { items } = await this.cashflow.findAll({
+  async analyzeBatch(@TenantId() tenantId: string, @Param('batchId') batchId: string) {
+    const { items } = await this.cashflow.findAll(tenantId, {
       page: 1,
       limit: 500,
       importBatch: batchId,
     });
     const ids = items.map((i) => String(i._id));
-    void this.cashflow.analyzeEntireBatch(batchId, ids);
+    void this.cashflow.analyzeEntireBatch(tenantId, batchId, ids);
     return { message: `Análise IA iniciada para ${ids.length} transações`, batchId };
   }
 }

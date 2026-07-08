@@ -5,7 +5,10 @@ export type WhatsAppSenderDocument = HydratedDocument<WhatsAppSender>;
 
 @Schema({ timestamps: true })
 export class WhatsAppSender {
-  @Prop({ required: true, unique: true, trim: true })
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
+  @Prop({ required: true, trim: true })
   waId: string;
 
   @Prop({ trim: true })
@@ -25,4 +28,4 @@ export class WhatsAppSender {
 }
 
 export const WhatsAppSenderSchema = SchemaFactory.createForClass(WhatsAppSender);
-WhatsAppSenderSchema.index({ waId: 1 }, { unique: true });
+WhatsAppSenderSchema.index({ tenantId: 1, waId: 1 }, { unique: true });

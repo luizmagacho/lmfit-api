@@ -11,6 +11,7 @@ import {
 import { Purchase, PurchaseSchema } from '../purchases/schemas/purchase.schema';
 import { Supplier, SupplierSchema } from '../suppliers/schemas/supplier.schema';
 import { UsersModule } from '../users/users.module';
+import { ProductionBatch, ProductionBatchSchema } from '../production/schemas/production-batch.schema';
 import { SeedService } from './seed.service';
 
 @Module({
@@ -24,6 +25,7 @@ import { SeedService } from './seed.service';
       { name: Invoice.name, schema: InvoiceSchema },
       { name: Product.name, schema: ProductSchema },
       { name: ProductVariant.name, schema: ProductVariantSchema },
+      { name: ProductionBatch.name, schema: ProductionBatchSchema },
     ]),
   ],
   providers: [SeedService],

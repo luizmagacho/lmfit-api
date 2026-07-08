@@ -6,6 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
 import type { StaffImportResponse } from '../common/dto/staff-import.response';
 import { parseBooleanLoose } from '../common/excel/cell-coerce';
@@ -51,6 +52,7 @@ export class ProductsService {
     @InjectModel(StockLedger.name)
     private readonly ledgerModel: Model<StockLedger>,
     private readonly excel: ExcelSpreadsheetService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   private resolveVariantRetail(it: ProductVariantUpsertDto): number {
@@ -160,12 +162,13 @@ export class ProductsService {
   }
 
   private async attachVariantsToProducts(
+    tenantId: string,
     products: Array<Record<string, unknown>>,
   ): Promise<Array<Record<string, unknown>>> {
     if (!products.length) return products;
     const ids = products.map((p) => new Types.ObjectId(String(p._id)));
     const all = await this.variantModel
-      .find({ productId: { $in: ids } })
+      .find({ tenantId: new Types.ObjectId(tenantId), productId: { $in: ids } })
       .sort({ sku: 1 })
       .lean()
       .exec();
@@ -207,11 +210,12 @@ export class ProductsService {
 
   /** SKU único global (case-insensitive); permite o próprio documento em updates. */
   private async assertSkuFreeForProduct(
+    tenantId: string,
     sku: string,
     excludeVariantId?: Types.ObjectId,
   ) {
     const re = new RegExp(`^${escapeRegex(sku.trim())}$`, 'i');
-    const found = await this.variantModel.findOne({ sku: { $regex: re } }).lean().exec();
+    const found = await this.variantModel.findOne({ tenantId: new Types.ObjectId(tenantId), sku: { $regex: re } }).lean().exec();
     if (!found) return;
     if (excludeVariantId && String(found._id) === String(excludeVariantId)) return;
     throw new ConflictException({
@@ -220,11 +224,12 @@ export class ProductsService {
   }
 
   private async replaceProductVariants(
+    tenantId: string,
     productId: Types.ObjectId,
     items: ProductVariantUpsertDto[],
   ): Promise<void> {
     const productDoc = (await this.productModel
-      .findById(productId)
+      .findOne({ _id: productId, tenantId: new Types.ObjectId(tenantId) })
       .lean()
       .exec()) as Record<string, unknown> | null;
     if (!productDoc) {
@@ -246,7 +251,7 @@ export class ProductsService {
       seen.add(key);
     }
 
-    const existing = await this.variantModel.find({ productId }).lean().exec();
+    const existing = await this.variantModel.find({ productId, tenantId: new Types.ObjectId(tenantId) }).lean().exec();
     const existingById = new Map(
       existing.map((v) => [String(v._id), v] as const),
     );
@@ -297,19 +302,21 @@ export class ProductsService {
         const oid = new Types.ObjectId(it._id);
         const prev = existingById.get(String(oid));
         if (prev && String(prev.productId) === String(productId)) {
-          await this.assertSkuFreeForProduct(sku, oid);
-          await this.variantModel.updateOne({ _id: oid }, { $set: payload }).exec();
+          await this.assertSkuFreeForProduct(tenantId, sku, oid);
+          await this.variantModel.updateOne({ _id: oid, tenantId: new Types.ObjectId(tenantId) }, { $set: payload }).exec();
           keptIds.push(oid);
         } else {
-          await this.assertSkuFreeForProduct(sku);
+          await this.assertSkuFreeForProduct(tenantId, sku);
           try {
             const doc = await this.variantModel.create({
+              tenantId: new Types.ObjectId(tenantId),
               productId,
               ...payload,
               reorderPoint: 0,
             });
             if (qty !== 0) {
               await this.ledgerModel.create({
+                tenantId: new Types.ObjectId(tenantId),
                 variantId: doc._id as Types.ObjectId,
                 delta: qty,
                 reason: 'initial',
@@ -330,15 +337,17 @@ export class ProductsService {
           }
         }
       } else {
-        await this.assertSkuFreeForProduct(sku);
+        await this.assertSkuFreeForProduct(tenantId, sku);
         try {
           const doc = await this.variantModel.create({
+            tenantId: new Types.ObjectId(tenantId),
             productId,
             ...payload,
             reorderPoint: 0,
           });
           if (qty !== 0) {
             await this.ledgerModel.create({
+              tenantId: new Types.ObjectId(tenantId),
               variantId: doc._id as Types.ObjectId,
               delta: qty,
               reason: 'initial',
@@ -363,23 +372,24 @@ export class ProductsService {
     const keepSet = new Set(keptIds.map((id) => String(id)));
     for (const v of existing) {
       if (!keepSet.has(String(v._id))) {
-        await this.ledgerModel.deleteMany({ variantId: v._id }).exec();
-        await this.variantModel.deleteOne({ _id: v._id }).exec();
+        await this.ledgerModel.deleteMany({ tenantId: new Types.ObjectId(tenantId), variantId: v._id }).exec();
+        await this.variantModel.deleteOne({ tenantId: new Types.ObjectId(tenantId), _id: v._id }).exec();
       }
     }
   }
 
-  private async rollbackNewProduct(pid: Types.ObjectId) {
-    const vs = await this.variantModel.find({ productId: pid }).select('_id').lean().exec();
+  private async rollbackNewProduct(tenantId: string, pid: Types.ObjectId) {
+    const vs = await this.variantModel.find({ tenantId: new Types.ObjectId(tenantId), productId: pid }).select('_id').lean().exec();
     for (const v of vs) {
-      await this.ledgerModel.deleteMany({ variantId: v._id }).exec();
+      await this.ledgerModel.deleteMany({ tenantId: new Types.ObjectId(tenantId), variantId: v._id }).exec();
     }
-    await this.variantModel.deleteMany({ productId: pid }).exec();
-    await this.productModel.deleteOne({ _id: pid }).exec();
+    await this.variantModel.deleteMany({ tenantId: new Types.ObjectId(tenantId), productId: pid }).exec();
+    await this.productModel.deleteOne({ tenantId: new Types.ObjectId(tenantId), _id: pid }).exec();
   }
 
-  async createProduct(dto: CreateProductDto) {
+  async createProduct(tenantId: string, dto: CreateProductDto) {
     const doc = await this.productModel.create({
+      tenantId: new Types.ObjectId(tenantId),
       name: dto.name,
       slug: dto.slug.toLowerCase(),
       description: dto.description,
@@ -403,7 +413,7 @@ export class ProductsService {
             message: 'variants não pode ser um array vazio',
           });
         }
-        await this.replaceProductVariants(pid, dto.variants);
+        await this.replaceProductVariants(tenantId, pid, dto.variants);
       } else if (dto.sku?.trim()) {
         const qty = Math.floor(
           Number(
@@ -434,6 +444,7 @@ export class ProductsService {
         }
         try {
           const vdoc = await this.variantModel.create({
+            tenantId: new Types.ObjectId(tenantId),
             productId: pid,
             sku: dto.sku.trim(),
             price: retail,
@@ -445,6 +456,7 @@ export class ProductsService {
           });
           if (qty !== 0) {
             await this.ledgerModel.create({
+              tenantId: new Types.ObjectId(tenantId),
               variantId: vdoc._id as Types.ObjectId,
               delta: qty,
               reason: 'initial',
@@ -464,23 +476,24 @@ export class ProductsService {
         }
       }
     } catch (e) {
-      await this.rollbackNewProduct(pid);
+      await this.rollbackNewProduct(tenantId, pid);
       throw e;
     }
 
-    return this.getProduct(String(pid));
+    return this.getProduct(tenantId, String(pid));
   }
 
-  async listProducts(page: number, limit: number, search?: string) {
+  async listProducts(tenantId: string, page: number, limit: number, search?: string) {
     const skip = skipFromPage(page, limit);
     const q = search
       ? {
+          tenantId: new Types.ObjectId(tenantId),
           $or: [
             { name: new RegExp(search, 'i') },
             { slug: new RegExp(search, 'i') },
           ],
         }
-      : {};
+      : { tenantId: new Types.ObjectId(tenantId) };
     const [rawItems, total] = await Promise.all([
       this.productModel
         .find(q)
@@ -491,24 +504,26 @@ export class ProductsService {
       this.productModel.countDocuments(q).exec(),
     ]);
     const items = await this.attachVariantsToProducts(
+      tenantId,
       rawItems as unknown as Record<string, unknown>[],
     );
     return { items, total, page, limit };
   }
 
-  private productListFilter(search?: string) {
+  private productListFilter(tenantId: string, search?: string) {
     return search
       ? {
+          tenantId: new Types.ObjectId(tenantId),
           $or: [
             { name: new RegExp(search, 'i') },
             { slug: new RegExp(search, 'i') },
           ],
         }
-      : {};
+      : { tenantId: new Types.ObjectId(tenantId) };
   }
 
-  async findAllProductsForExport(search?: string) {
-    const q = this.productListFilter(search);
+  async findAllProductsForExport(tenantId: string, search?: string) {
+    const q = this.productListFilter(tenantId, search);
     return this.productModel.find(q).sort({ createdAt: -1 }).lean().exec();
   }
 
@@ -524,11 +539,12 @@ export class ProductsService {
   }
 
   async exportProductsBuffer(
+    tenantId: string,
     format: 'xlsx' | 'csv',
     search?: string,
   ): Promise<{ buffer: Buffer; filename: string; mime: string }> {
-    const rawDocs = await this.findAllProductsForExport(search);
-    const docs = await this.attachVariantsToProducts(rawDocs as unknown as Record<string, unknown>[]);
+    const rawDocs = await this.findAllProductsForExport(tenantId, search);
+    const docs = await this.attachVariantsToProducts(tenantId, rawDocs as unknown as Record<string, unknown>[]);
     const rows: Record<string, unknown>[] = [];
     
     for (const doc of docs) {
@@ -613,13 +629,15 @@ export class ProductsService {
   }
 
   async importProductsFromJson(
+    tenantId: string,
     items: Record<string, unknown>[],
     dryRun: boolean,
   ): Promise<StaffImportResponse> {
-    return this.importProductRecords(items, dryRun);
+    return this.importProductRecords(tenantId, items, dryRun);
   }
 
   async importProductsFromXlsx(
+    tenantId: string,
     buffer: Buffer,
     dryRun: boolean,
   ): Promise<StaffImportResponse> {
@@ -627,10 +645,11 @@ export class ProductsService {
       buffer,
       productImportHeaderAliases(),
     );
-    return this.importProductRecords(records, dryRun);
+    return this.importProductRecords(tenantId, records, dryRun);
   }
 
   private async importProductRecords(
+    tenantId: string,
     items: Record<string, unknown>[],
     dryRun: boolean,
   ): Promise<StaffImportResponse> {
@@ -677,7 +696,7 @@ export class ProductsService {
 
         if (dryRun) {
           if (id && Types.ObjectId.isValid(id)) {
-            const exists = await this.productModel.findById(id).lean().exec();
+            const exists = await this.productModel.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).lean().exec();
             if (!exists) {
               errors.push({
                 row: groupIndex,
@@ -689,7 +708,7 @@ export class ProductsService {
         }
 
         if (id && Types.ObjectId.isValid(id)) {
-          const exists = await this.productModel.findById(id).exec();
+          const exists = await this.productModel.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).exec();
           if (!exists) {
             errors.push({ row: groupIndex, message: `_id não encontrado: ${id}` });
             continue;
@@ -697,14 +716,14 @@ export class ProductsService {
           if (Object.keys(patch).length === 0 && (!patch.variants || patch.variants.length === 0)) {
             continue;
           }
-          await this.updateProduct(id, patch);
+          await this.updateProduct(tenantId, id, patch);
           updated++;
         } else {
           if (!create) {
             errors.push({ row: groupIndex, message: 'Linha inválida' });
             continue;
           }
-          await this.createProduct(create);
+          await this.createProduct(tenantId, create);
           imported++;
         }
       } catch (e) {
@@ -744,13 +763,13 @@ export class ProductsService {
     };
   }
 
-  async getProduct(id: string) {
+  async getProduct(tenantId: string, id: string) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
-    const p = await this.productModel.findById(id).lean().exec();
+    const p = await this.productModel.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).lean().exec();
     if (!p) throw new NotFoundException();
     const pObj = p as unknown as Record<string, unknown>;
     const variantsRaw = await this.variantModel
-      .find({ productId: new Types.ObjectId(id) })
+      .find({ productId: new Types.ObjectId(id), tenantId: new Types.ObjectId(tenantId) })
       .sort({ sku: 1 })
       .lean();
     const variants = variantsRaw.map((v) =>
@@ -759,7 +778,7 @@ export class ProductsService {
     return this.enrichProductPricing({ ...pObj, variants }, variants);
   }
 
-  async updateProduct(id: string, dto: UpdateProductDto) {
+  async updateProduct(tenantId: string, id: string, dto: UpdateProductDto) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
     const pid = new Types.ObjectId(id);
 
@@ -769,7 +788,7 @@ export class ProductsService {
           message: 'variants não pode ser um array vazio',
         });
       }
-      await this.replaceProductVariants(pid, dto.variants);
+      await this.replaceProductVariants(tenantId, pid, dto.variants);
     }
 
     const patch: Record<string, unknown> = {};
@@ -789,37 +808,38 @@ export class ProductsService {
 
     if (Object.keys(patch).length > 0) {
       const doc = await this.productModel
-        .findByIdAndUpdate(id, patch, { new: true })
+        .findOneAndUpdate({ _id: id, tenantId: new Types.ObjectId(tenantId) }, patch, { new: true })
         .lean()
         .exec();
       if (!doc) throw new NotFoundException();
     } else {
-      const exists = await this.productModel.findById(id).lean().exec();
+      const exists = await this.productModel.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).lean().exec();
       if (!exists) throw new NotFoundException();
     }
 
-    return this.getProduct(id);
+    return this.getProduct(tenantId, id);
   }
 
-  async removeProduct(id: string) {
+  async removeProduct(tenantId: string, id: string) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
     const pid = new Types.ObjectId(id);
-    const variants = await this.variantModel.find({ productId: pid }).exec();
+    const variants = await this.variantModel.find({ productId: pid, tenantId: new Types.ObjectId(tenantId) }).exec();
     for (const v of variants) {
-      await this.ledgerModel.deleteMany({ variantId: v._id }).exec();
-      await this.variantModel.deleteOne({ _id: v._id }).exec();
+      await this.ledgerModel.deleteMany({ variantId: v._id, tenantId: new Types.ObjectId(tenantId) }).exec();
+      await this.variantModel.deleteOne({ _id: v._id, tenantId: new Types.ObjectId(tenantId) }).exec();
     }
-    const res = await this.productModel.findByIdAndDelete(id).exec();
+    const res = await this.productModel.findOneAndDelete({ _id: id, tenantId: new Types.ObjectId(tenantId) }).exec();
     if (!res) throw new NotFoundException();
     return { deleted: true };
   }
 
-  async createVariant(productId: string, dto: CreateVariantDto) {
+  async createVariant(tenantId: string, productId: string, dto: CreateVariantDto) {
     if (!Types.ObjectId.isValid(productId)) throw new NotFoundException();
-    const p = await this.productModel.findById(productId).exec();
+    const p = await this.productModel.findOne({ _id: productId, tenantId: new Types.ObjectId(tenantId) }).exec();
     if (!p) throw new NotFoundException();
     const qty = dto.quantityOnHand ?? 0;
     const doc = await this.variantModel.create({
+      tenantId: new Types.ObjectId(tenantId),
       productId: new Types.ObjectId(productId),
       sku: dto.sku.trim(),
       color: dto.color,
@@ -835,6 +855,7 @@ export class ProductsService {
     });
     if (qty !== 0) {
       await this.ledgerModel.create({
+        tenantId: new Types.ObjectId(tenantId),
         variantId: doc._id as Types.ObjectId,
         delta: qty,
         reason: 'initial',
@@ -844,56 +865,63 @@ export class ProductsService {
     return doc;
   }
 
-  async getVariant(id: string) {
+  async getVariant(tenantId: string, id: string) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
-    const v = await this.variantModel.findById(id).lean().exec();
+    const v = await this.variantModel.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).lean().exec();
     if (!v) throw new NotFoundException();
     return v;
   }
 
-  async updateVariant(id: string, dto: UpdateVariantDto) {
+  async updateVariant(tenantId: string, id: string, dto: UpdateVariantDto) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
     const doc = await this.variantModel
-      .findByIdAndUpdate(id, dto, { new: true })
+      .findOneAndUpdate({ _id: id, tenantId: new Types.ObjectId(tenantId) }, dto, { new: true })
       .lean()
       .exec();
     if (!doc) throw new NotFoundException();
     return doc;
   }
 
-  async removeVariant(id: string) {
+  async removeVariant(tenantId: string, id: string) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
-    await this.ledgerModel.deleteMany({ variantId: new Types.ObjectId(id) });
-    const res = await this.variantModel.findByIdAndDelete(id).exec();
+    await this.ledgerModel.deleteMany({ variantId: new Types.ObjectId(id), tenantId: new Types.ObjectId(tenantId) });
+    const res = await this.variantModel.findOneAndDelete({ _id: id, tenantId: new Types.ObjectId(tenantId) }).exec();
     if (!res) throw new NotFoundException();
     return { deleted: true };
   }
 
   async applyStockMovement(
+    tenantId: string,
     variantId: string,
     dto: StockMovementDto,
     createdBy?: string,
   ) {
-    return this.applyStockMovementWithOrderMeta(variantId, dto, createdBy, undefined);
+    return this.applyStockMovementWithOrderMeta(tenantId, variantId, dto, createdBy, undefined);
   }
 
   /**
    * Ledger entries tied to an order (sale / sale_reversal) for idempotent stock on pay/cancel.
    */
   async applyStockMovementWithOrderMeta(
+    tenantId: string | undefined,
     variantId: string,
     dto: StockMovementDto,
     createdBy?: string,
     orderId?: Types.ObjectId,
   ) {
     if (!Types.ObjectId.isValid(variantId)) throw new NotFoundException();
-    const v = await this.variantModel.findById(variantId).exec();
+    const query: Record<string, any> = { _id: new Types.ObjectId(variantId) };
+    if (tenantId) {
+      query.tenantId = new Types.ObjectId(tenantId);
+    }
+    const v = await this.variantModel.findOne(query).exec();
     if (!v) throw new NotFoundException();
     const next = v.quantityOnHand + dto.delta;
     if (next < 0) {
       throw new BadRequestException('Stock cannot go negative');
     }
     await this.ledgerModel.create({
+      tenantId: v.tenantId,
       variantId: v._id as Types.ObjectId,
       delta: dto.delta,
       reason: dto.reason,
@@ -903,6 +931,15 @@ export class ProductsService {
     });
     v.quantityOnHand = next;
     await v.save();
+
+    // Notify integrations of stock change
+    this.eventEmitter.emit('stock.changed', {
+      tenantId: String(v.tenantId),
+      variantId: String(v._id),
+      newQuantity: next,
+      reason: dto.reason,
+    });
+
     return v.toObject();
   }
 
@@ -910,15 +947,20 @@ export class ProductsService {
   async getNetOrderStockDelta(
     orderId: Types.ObjectId,
     variantId: Types.ObjectId,
+    tenantId?: string,
   ): Promise<number> {
+    const query: Record<string, any> = {
+      orderId,
+      variantId,
+      reason: { $in: ['sale', 'sale_reversal'] },
+    };
+    if (tenantId) {
+      query.tenantId = new Types.ObjectId(tenantId);
+    }
     const agg = await this.ledgerModel
       .aggregate<{ total: number }>([
         {
-          $match: {
-            orderId,
-            variantId,
-            reason: { $in: ['sale', 'sale_reversal'] },
-          },
+          $match: query,
         },
         { $group: { _id: null, total: { $sum: '$delta' } } },
       ])
@@ -934,11 +976,12 @@ export class ProductsService {
     variantId: string,
     quantitySold: number,
     createdBy?: string,
+    tenantId?: string,
   ) {
     if (!Types.ObjectId.isValid(variantId)) throw new NotFoundException();
     const vid = new Types.ObjectId(variantId);
     const targetNet = -quantitySold;
-    const currentNet = await this.getNetOrderStockDelta(orderId, vid);
+    const currentNet = await this.getNetOrderStockDelta(orderId, vid, tenantId);
     const delta = targetNet - currentNet;
     if (delta === 0) return null;
     if (delta > 0) {
@@ -947,6 +990,7 @@ export class ProductsService {
       );
     }
     return this.applyStockMovementWithOrderMeta(
+      tenantId,
       variantId,
       {
         delta,
@@ -965,10 +1009,11 @@ export class ProductsService {
     orderId: Types.ObjectId,
     variantId: string,
     createdBy?: string,
+    tenantId?: string,
   ) {
     if (!Types.ObjectId.isValid(variantId)) throw new NotFoundException();
     const vid = new Types.ObjectId(variantId);
-    const currentNet = await this.getNetOrderStockDelta(orderId, vid);
+    const currentNet = await this.getNetOrderStockDelta(orderId, vid, tenantId);
     const delta = -currentNet;
     if (delta === 0) return null;
     if (delta < 0) {
@@ -977,6 +1022,7 @@ export class ProductsService {
       );
     }
     return this.applyStockMovementWithOrderMeta(
+      tenantId,
       variantId,
       {
         delta,
@@ -993,6 +1039,7 @@ export class ProductsService {
     orderId: Types.ObjectId,
     lines: Array<{ variantId: Types.ObjectId; quantity: number }>,
     createdBy?: string,
+    tenantId?: string,
   ) {
     const byVar = new Map<string, number>();
     for (const l of lines) {
@@ -1000,7 +1047,7 @@ export class ProductsService {
       byVar.set(k, (byVar.get(k) ?? 0) + l.quantity);
     }
     for (const [vidStr, qty] of byVar) {
-      await this.applySaleDeductionForOrderLine(orderId, vidStr, qty, createdBy);
+      await this.applySaleDeductionForOrderLine(orderId, vidStr, qty, createdBy, tenantId);
     }
   }
 
@@ -1008,33 +1055,39 @@ export class ProductsService {
     orderId: Types.ObjectId,
     lines: Array<{ variantId: Types.ObjectId }>,
     createdBy?: string,
+    tenantId?: string,
   ) {
     const seen = new Set<string>();
     for (const l of lines) {
       const k = l.variantId.toString();
       if (seen.has(k)) continue;
       seen.add(k);
-      await this.applySaleReversalForOrderVariant(orderId, k, createdBy);
+      await this.applySaleReversalForOrderVariant(orderId, k, createdBy, tenantId);
     }
   }
 
-  async listVariantsNeedingReorder() {
+  async listVariantsNeedingReorder(tenantId?: string) {
+    const query: Record<string, any> = {
+      $expr: { $lte: ['$quantityOnHand', '$reorderPoint'] },
+      reorderPoint: { $gt: 0 },
+    };
+    if (tenantId) {
+      query.tenantId = new Types.ObjectId(tenantId);
+    }
     return this.variantModel
-      .find({
-        $expr: { $lte: ['$quantityOnHand', '$reorderPoint'] },
-        reorderPoint: { $gt: 0 },
-      })
+      .find(query)
       .populate('productId', 'name slug')
       .lean()
       .exec();
   }
 
   /** Distinct non-empty categories for active products. */
-  async listPublicCatalogCategories(): Promise<string[]> {
+  async listPublicCatalogCategories(tenantId: string): Promise<string[]> {
     const cats = await this.productModel
       .distinct(
         'category',
         {
+          tenantId: new Types.ObjectId(tenantId),
           active: true,
           category: { $nin: [null, ''] },
         } as Record<string, unknown>,
@@ -1045,17 +1098,20 @@ export class ProductsService {
       .sort((a, b) => a.localeCompare(b, 'pt-BR'));
   }
 
-  async getPublicProductBySlug(slug: string) {
+  async getPublicProductBySlug(tenantId: string, slug: string) {
     const p = await this.productModel
-      .findOne({ slug: slug.toLowerCase().trim(), active: true })
+      .findOne({ tenantId: new Types.ObjectId(tenantId), slug: slug.toLowerCase().trim(), active: true })
       .lean()
       .exec();
     if (!p) throw new NotFoundException();
-    return this.getProduct(String(p._id));
+    return this.getProduct(tenantId, String(p._id));
   }
 
   /** Active products with variants for public catalog (no auth). */
-  async bulkPatch(dto: ProductsBulkPatchDto): Promise<{
+  async bulkPatch(
+    tenantId: string,
+    dto: ProductsBulkPatchDto,
+  ): Promise<{
     updated: string[];
     failed: { id: string; error: string }[];
   }> {
@@ -1090,7 +1146,7 @@ export class ProductsService {
           failed.push({ id, error: 'ID inválido' });
           continue;
         }
-        const p = await this.productModel.findById(id).exec();
+        const p = await this.productModel.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).exec();
         if (!p) {
           failed.push({ id, error: 'Produto não encontrado' });
           continue;
@@ -1099,7 +1155,7 @@ export class ProductsService {
           failed.push({ id, error: 'Produto arquivado' });
           continue;
         }
-        const variants = await this.variantModel.find({ productId: p._id }).exec();
+        const variants = await this.variantModel.find({ productId: p._id, tenantId: new Types.ObjectId(tenantId) }).exec();
         if (!variants.length) {
           failed.push({ id, error: 'Sem variantes' });
           continue;
@@ -1134,7 +1190,7 @@ export class ProductsService {
             patch.quantityOnHand = nq;
           }
           if (Object.keys(patch).length) {
-            await this.variantModel.updateOne({ _id: v._id }, { $set: patch }).exec();
+            await this.variantModel.updateOne({ _id: v._id, tenantId: new Types.ObjectId(tenantId) }, { $set: patch }).exec();
           }
         }
         updated.push(id);
@@ -1151,10 +1207,15 @@ export class ProductsService {
     return { updated, failed };
   }
 
-  async listPublicCatalog(): Promise<Record<string, unknown>[]> {
+  async listPublicCatalog(tenantId: string): Promise<Record<string, unknown>[]> {
     const raw = await this.productModel
       .aggregate([
-        { $match: { active: true } },
+        {
+          $match: {
+            tenantId: new Types.ObjectId(tenantId),
+            active: true,
+          },
+        },
         { $sort: { name: 1 } },
         {
           $lookup: {

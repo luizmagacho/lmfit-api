@@ -5,6 +5,9 @@ export type LowStockAlertDocument = HydratedDocument<LowStockAlert>;
 
 @Schema({ timestamps: true })
 export class LowStockAlert {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   @Prop({ type: Types.ObjectId, ref: 'ProductVariant', required: true, index: true })
   variantId: Types.ObjectId;
 

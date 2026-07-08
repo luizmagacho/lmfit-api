@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsMongoId, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsMongoId, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 import { BrlMoney } from '../../common/money/brl-money.decorator';
 
 export class OrderLineInputDto {
@@ -28,4 +28,9 @@ export class OrderLineInputDto {
   @IsNumber()
   @Min(0)
   productionPrice?: number;
+
+  @ApiPropertyOptional({ description: 'Se true, não deduz estoque (encomenda)' })
+  @IsOptional()
+  @IsBoolean()
+  isOrder?: boolean;
 }

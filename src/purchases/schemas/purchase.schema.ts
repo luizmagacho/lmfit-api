@@ -27,6 +27,9 @@ const PurchaseLineSchema = new MSchema(
 
 @Schema({ timestamps: true })
 export class Purchase {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   @Prop({ type: Types.ObjectId, ref: 'Supplier', required: true })
   supplierId: Types.ObjectId;
 
@@ -59,3 +62,4 @@ export class Purchase {
 export const PurchaseSchema = SchemaFactory.createForClass(Purchase);
 /** Index for purchases-daily report; expected query window ≤ 90 days. */
 PurchaseSchema.index({ createdAt: 1 });
+PurchaseSchema.index({ tenantId: 1, createdAt: -1 });

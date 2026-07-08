@@ -38,8 +38,8 @@ export class InvoicesService {
     return { status };
   }
 
-  private listQuery(search?: string, status?: InvoiceListQueryDto['status']) {
-    const parts: Record<string, unknown>[] = [];
+  private listQuery(tenantId: string, search?: string, status?: InvoiceListQueryDto['status']) {
+    const parts: Record<string, unknown>[] = [{ tenantId: new Types.ObjectId(tenantId) }];
     const st = this.statusFilterClause(status);
     if (st) parts.push(st);
     if (search) {
@@ -50,13 +50,12 @@ export class InvoicesService {
         ],
       });
     }
-    if (parts.length === 0) return {};
-    if (parts.length === 1) return parts[0];
     return { $and: parts };
   }
 
-  async create(dto: CreateInvoiceDto, createdBy?: string) {
+  async create(tenantId: string, dto: CreateInvoiceDto, createdBy?: string) {
     const doc = await this.model.create({
+      tenantId: new Types.ObjectId(tenantId),
       number: dto.number,
       status: dto.status ?? 'pending',
       amount: dto.amount,
@@ -72,13 +71,14 @@ export class InvoicesService {
   }
 
   async findAll(
+    tenantId: string,
     page: number,
     limit: number,
     search?: string,
     status?: InvoiceListQueryDto['status'],
   ) {
     const skip = skipFromPage(page, limit);
-    const q = this.listQuery(search, status);
+    const q = this.listQuery(tenantId, search, status);
     const [rawItems, total] = await Promise.all([
       this.model.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       this.model.countDocuments(q).exec(),
@@ -90,10 +90,11 @@ export class InvoicesService {
   }
 
   async findAllForExport(
+    tenantId: string,
     search?: string,
     status?: InvoiceListQueryDto['status'],
   ) {
-    const q = this.listQuery(search, status);
+    const q = this.listQuery(tenantId, search, status);
     return this.model.find(q).sort({ createdAt: -1 }).lean().exec();
   }
 
@@ -109,11 +110,12 @@ export class InvoicesService {
   }
 
   async exportBuffer(
+    tenantId: string,
     format: 'xlsx' | 'csv',
     search?: string,
     status?: InvoiceListQueryDto['status'],
   ): Promise<{ buffer: Buffer; filename: string; mime: string }> {
-    const docs = await this.findAllForExport(search, status);
+    const docs = await this.findAllForExport(tenantId, search, status);
     const rows = docs.map((d) =>
       this.serializeInvoiceRow(d as unknown as Record<string, unknown>),
     );
@@ -191,14 +193,16 @@ export class InvoicesService {
   }
 
   async importFromJson(
+    tenantId: string,
     items: Record<string, unknown>[],
     dryRun: boolean,
     createdBy?: string,
   ): Promise<StaffImportResponse> {
-    return this.importRecords(items, dryRun, createdBy);
+    return this.importRecords(tenantId, items, dryRun, createdBy);
   }
 
   async importFromXlsx(
+    tenantId: string,
     buffer: Buffer,
     dryRun: boolean,
     createdBy?: string,
@@ -207,10 +211,11 @@ export class InvoicesService {
       buffer,
       invoiceImportHeaderAliases(),
     );
-    return this.importRecords(records, dryRun, createdBy);
+    return this.importRecords(tenantId, records, dryRun, createdBy);
   }
 
   private async importRecords(
+    tenantId: string,
     items: Record<string, unknown>[],
     dryRun: boolean,
     createdBy?: string,
@@ -226,7 +231,10 @@ export class InvoicesService {
         const { id, create, patch } = this.parseInvoiceRow(items[i]);
         if (dryRun) {
           if (id && Types.ObjectId.isValid(id)) {
-            const exists = await this.model.findById(id).lean().exec();
+            const exists = await this.model
+              .findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) })
+              .lean()
+              .exec();
             if (!exists) {
               errors.push({
                 row: rowNum,
@@ -234,20 +242,22 @@ export class InvoicesService {
               });
             }
           }
-          void create;
-          void patch;
           continue;
         }
         if (id && Types.ObjectId.isValid(id)) {
-          const exists = await this.model.findById(id).exec();
+          const exists = await this.model.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).exec();
           if (!exists) {
             errors.push({ row: rowNum, message: `_id não encontrado: ${id}` });
             continue;
           }
-          await this.model.findByIdAndUpdate(id, patch, { new: true }).exec();
+          await this.model.findOneAndUpdate(
+            { _id: id, tenantId: new Types.ObjectId(tenantId) },
+            patch,
+            { new: true }
+          ).exec();
           updated++;
         } else {
-          await this.create(create, createdBy);
+          await this.create(tenantId, create, createdBy);
           imported++;
         }
       } catch (e) {
@@ -288,26 +298,26 @@ export class InvoicesService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(tenantId: string, id: string) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
-    const doc = await this.model.findById(id).lean().exec();
+    const doc = await this.model.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).lean().exec();
     if (!doc) throw new NotFoundException();
     return enrichInvoiceWithStatusI18n(doc as { status?: string });
   }
 
-  async update(id: string, dto: UpdateInvoiceDto) {
+  async update(tenantId: string, id: string, dto: UpdateInvoiceDto) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
     const doc = await this.model
-      .findByIdAndUpdate(id, dto, { new: true })
+      .findOneAndUpdate({ _id: id, tenantId: new Types.ObjectId(tenantId) }, dto, { new: true })
       .lean()
       .exec();
     if (!doc) throw new NotFoundException();
     return enrichInvoiceWithStatusI18n(doc as { status?: string });
   }
 
-  async remove(id: string) {
+  async remove(tenantId: string, id: string) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
-    const res = await this.model.findByIdAndDelete(id).exec();
+    const res = await this.model.findOneAndDelete({ _id: id, tenantId: new Types.ObjectId(tenantId) }).exec();
     if (!res) throw new NotFoundException();
     return { deleted: true };
   }

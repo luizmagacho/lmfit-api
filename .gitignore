@@ -5,3 +5,4 @@ coverage/
 !.env.example
 *.log
 seed_fitness.js
+backups/

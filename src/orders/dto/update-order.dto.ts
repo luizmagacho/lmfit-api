@@ -24,11 +24,11 @@ export class UpdateOrderDto {
   channel?: (typeof ORDER_CHANNELS)[number];
 
   @ApiPropertyOptional({
-    enum: ['open', 'picking', 'shipped', 'completed', 'cancelled'],
+    enum: ['open', 'picking', 'shipped', 'completed', 'cancelled', 'encomendado_pago', 'encomendado_nao_pago'],
   })
   @IsOptional()
-  @IsEnum(['open', 'picking', 'shipped', 'completed', 'cancelled'])
-  status?: 'open' | 'picking' | 'shipped' | 'completed' | 'cancelled';
+  @IsEnum(['open', 'picking', 'shipped', 'completed', 'cancelled', 'encomendado_pago', 'encomendado_nao_pago'])
+  status?: 'open' | 'picking' | 'shipped' | 'completed' | 'cancelled' | 'encomendado_pago' | 'encomendado_nao_pago';
 
   @ApiPropertyOptional()
   @IsOptional()

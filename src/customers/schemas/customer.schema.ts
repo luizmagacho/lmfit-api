@@ -6,6 +6,9 @@ export type CustomerDocument = HydratedDocument<Customer>;
 
 @Schema({ timestamps: true })
 export class Customer {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   @Prop({ required: true, trim: true })
   name: string;
 
@@ -41,3 +44,4 @@ export class Customer {
 }
 
 export const CustomerSchema = SchemaFactory.createForClass(Customer);
+CustomerSchema.index({ tenantId: 1, createdAt: -1 });

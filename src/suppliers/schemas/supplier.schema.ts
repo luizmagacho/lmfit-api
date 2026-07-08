@@ -5,6 +5,9 @@ export type SupplierDocument = HydratedDocument<Supplier>;
 
 @Schema({ timestamps: true })
 export class Supplier {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   @Prop({ required: true, trim: true })
   name: string;
 

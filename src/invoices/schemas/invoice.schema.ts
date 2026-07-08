@@ -23,6 +23,9 @@ const INVOICE_STATUS_ENUM: InvoiceStatus[] = [
 
 @Schema({ timestamps: true })
 export class Invoice {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   @Prop({ trim: true, sparse: true })
   number?: string;
 
@@ -49,3 +52,4 @@ export class Invoice {
 }
 
 export const InvoiceSchema = SchemaFactory.createForClass(Invoice);
+InvoiceSchema.index({ tenantId: 1, createdAt: -1 });

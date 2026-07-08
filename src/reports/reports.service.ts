@@ -37,10 +37,15 @@ export class ReportsService {
    * Dates are UTC. Each point: { date: "YYYY-MM-DD", purchaseCount, totalAmount }.
    * Days with zero purchases are included in the output.
    */
-  async purchasesDaily(range: ReportsRange) {
+  async purchasesDaily(tenantId: string, range: ReportsRange) {
     const rows = await this.purchaseModel
       .aggregate<{ date: string; purchaseCount: number; totalAmount: number }>([
-        { $match: { createdAt: { $gte: range.from, $lte: range.to } } },
+        {
+          $match: {
+            tenantId: new Types.ObjectId(tenantId),
+            createdAt: { $gte: range.from, $lte: range.to },
+          },
+        },
         {
           $group: {
             _id: {
@@ -97,10 +102,69 @@ export class ReportsService {
    * Returns top N products by net line revenue (quantity × unitPrice) from paid/fulfilled orders.
    * Excludes taxes and shipping. Source: orders.lines.
    */
-  async revenueByProduct(range: ReportsRange, limit = 10) {
+
+  async salesAndPurchasesDaily(tenantId: string, range: ReportsRange) {
+    const purchaseRows = await this.purchaseModel
+      .aggregate([
+        { $match: { tenantId: new Types.ObjectId(tenantId), createdAt: { $gte: range.from, $lte: range.to } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'UTC' } },
+            purchaseCount: { $sum: 1 },
+            totalPurchases: { $sum: '$total' },
+          },
+        },
+      ])
+      .exec();
+
+    const salesRows = await this.orderModel
+      .aggregate([
+        { $match: { tenantId: new Types.ObjectId(tenantId), createdAt: { $gte: range.from, $lte: range.to }, status: 'completed' } },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'UTC' } },
+            orderCount: { $sum: 1 },
+            totalSales: { $sum: '$total' },
+          },
+        },
+      ])
+      .exec();
+
+    const byDate = new Map();
+    for (const r of purchaseRows) {
+      byDate.set(r._id, { date: r._id, purchaseCount: r.purchaseCount, totalPurchases: Math.round(r.totalPurchases * 100) / 100, orderCount: 0, totalSales: 0 });
+    }
+    for (const r of salesRows) {
+      if (!byDate.has(r._id)) {
+        byDate.set(r._id, { date: r._id, purchaseCount: 0, totalPurchases: 0, orderCount: 0, totalSales: 0 });
+      }
+      const entry = byDate.get(r._id);
+      entry.orderCount = r.orderCount;
+      entry.totalSales = Math.round(r.totalSales * 100) / 100;
+    }
+
+    const points = [];
+    const cursor = new Date(Date.UTC(range.from.getUTCFullYear(), range.from.getUTCMonth(), range.from.getUTCDate()));
+    const end = new Date(Date.UTC(range.to.getUTCFullYear(), range.to.getUTCMonth(), range.to.getUTCDate()));
+    
+    while (cursor <= end) {
+      const dateStr = cursor.toISOString().slice(0, 10);
+      const hit = byDate.get(dateStr);
+      points.push(hit ?? { date: dateStr, purchaseCount: 0, totalPurchases: 0, orderCount: 0, totalSales: 0 });
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    return {
+      range: { from: range.from.toISOString(), to: range.to.toISOString() },
+      points,
+    };
+  }
+
+  async revenueByProduct(tenantId: string, range: ReportsRange, limit = 10) {
     const matchPaid = {
+      tenantId: new Types.ObjectId(tenantId),
       createdAt: { $gte: range.from, $lte: range.to },
-      status: { $in: ['paid', 'fulfilled'] as const },
+      status: { $in: ['completed'] as const },
     };
     const rows = await this.orderModel
       .aggregate<{ _id: Types.ObjectId; revenue: number; units: number }>([
@@ -130,12 +194,12 @@ export class ReportsService {
     const items = await Promise.all(
       rows.map(async (r) => {
         const prod = await this.productModel
-          .findById(r._id)
+          .findOne({ _id: r._id, tenantId: new Types.ObjectId(tenantId) })
           .select({ name: 1 })
           .lean()
           .exec();
         const firstVar = await this.variantModel
-          .findOne({ productId: r._id })
+          .findOne({ productId: r._id, tenantId: new Types.ObjectId(tenantId) })
           .sort({ sku: 1 })
           .select({ sku: 1 })
           .lean()
@@ -156,15 +220,16 @@ export class ReportsService {
     };
   }
 
-  async salesToday(dateStr?: string) {
+  async salesToday(tenantId: string, dateStr?: string) {
     const ref = dateStr ? new Date(dateStr) : new Date();
     if (Number.isNaN(ref.getTime())) {
       throw new BadRequestException('Data inválida');
     }
     const { from, to } = this.utcDayRange(ref);
     const matchPaid = {
+      tenantId: new Types.ObjectId(tenantId),
       createdAt: { $gte: from, $lte: to },
-      status: { $in: ['paid', 'fulfilled'] as const },
+      status: { $in: ['completed'] as const },
     };
     const [agg] = await this.orderModel
       .aggregate<{ total: number; count: number }>([
@@ -189,10 +254,11 @@ export class ReportsService {
     };
   }
 
-  async abc(range: ReportsRange) {
+  async abc(tenantId: string, range: ReportsRange) {
     const matchPaid = {
+      tenantId: new Types.ObjectId(tenantId),
       createdAt: { $gte: range.from, $lte: range.to },
-      status: { $in: ['paid', 'fulfilled'] as const },
+      status: { $in: ['completed'] as const },
     };
     const rows = await this.orderModel
       .aggregate<{
@@ -243,12 +309,12 @@ export class ReportsService {
       const curve: 'A' | 'B' | 'C' =
         cumulativePercent <= 80 ? 'A' : cumulativePercent <= 95 ? 'B' : 'C';
       const prod = await this.productModel
-        .findById(r._id)
+        .findOne({ _id: r._id, tenantId: new Types.ObjectId(tenantId) })
         .select({ name: 1 })
         .lean()
         .exec();
       const firstVar = await this.variantModel
-        .findOne({ productId: r._id })
+        .findOne({ productId: r._id, tenantId: new Types.ObjectId(tenantId) })
         .sort({ sku: 1 })
         .select({ sku: 1 })
         .lean()
@@ -269,10 +335,11 @@ export class ReportsService {
     };
   }
 
-  async summary(range: ReportsRange) {
+  async summary(tenantId: string, range: ReportsRange) {
     const matchPaid = {
+      tenantId: new Types.ObjectId(tenantId),
       createdAt: { $gte: range.from, $lte: range.to },
-      status: { $in: ['paid', 'fulfilled'] as const },
+      status: { $in: ['completed'] as const },
     };
 
     const [revenueAgg] = await this.orderModel
@@ -333,7 +400,7 @@ export class ReportsService {
       .exec();
 
     const variants = await this.variantModel
-      .find({})
+      .find({ tenantId: new Types.ObjectId(tenantId) })
       .select({ sku: 1, quantityOnHand: 1, price: 1 })
       .lean()
       .exec();
@@ -346,7 +413,7 @@ export class ReportsService {
     const orderCount = revenueAgg?.count ?? 0;
     const avgTicket =
       orderCount > 0 ? Math.round((totalRev / orderCount) * 100) / 100 : 0;
-    const st = await this.salesToday();
+    const st = await this.salesToday(tenantId);
     const salesToday = st.total;
 
     return {
@@ -368,11 +435,12 @@ export class ReportsService {
    * DRE Simplificado (Demonstrativo de Resultado do Exercício).
    * Agrega: faturamento (orders), CMV (production batches), despesas (cashflow).
    */
-  async dre(range: ReportsRange, taxRatePercent = 6) {
+  async dre(tenantId: string, range: ReportsRange, taxRatePercent = 6) {
     // ── 1. Faturamento Bruto (orders pagas/entregues) ──────────────────
     const matchPaid = {
+      tenantId: new Types.ObjectId(tenantId),
       createdAt: { $gte: range.from, $lte: range.to },
-      status: { $in: ['paid', 'fulfilled'] as const },
+      status: { $in: ['completed'] as const },
     };
     const [revAgg] = await this.orderModel
       .aggregate<{ total: number; count: number }>([
@@ -389,6 +457,7 @@ export class ReportsService {
       .aggregate<{ total: number; count: number }>([
         {
           $match: {
+            tenantId: new Types.ObjectId(tenantId),
             createdAt: { $gte: range.from, $lte: range.to },
             status: 'cancelled',
           },
@@ -402,7 +471,12 @@ export class ReportsService {
     // ── 2. CMV — soma dos custos totais dos lotes produzidos no período ──
     const [batchAgg] = await this.batchModel
       .aggregate<{ totalBatchCost: number; totalUnits: number; batchCount: number }>([
-        { $match: { createdAt: { $gte: range.from, $lte: range.to } } },
+        {
+          $match: {
+            tenantId: new Types.ObjectId(tenantId),
+            createdAt: { $gte: range.from, $lte: range.to },
+          },
+        },
         {
           $group: {
             _id: null,
@@ -432,6 +506,7 @@ export class ReportsService {
         .aggregate<{ total: number }>([
           {
             $match: {
+              tenantId: new Types.ObjectId(tenantId),
               date: { $gte: range.from.toISOString(), $lte: range.to.toISOString() },
               amount: { $lt: 0 },
             },
@@ -443,6 +518,7 @@ export class ReportsService {
         .aggregate<{ total: number }>([
           {
             $match: {
+              tenantId: new Types.ObjectId(tenantId),
               date: { $gte: range.from.toISOString(), $lte: range.to.toISOString() },
               type: { $in: ['pix_sent'] },
               amount: { $lt: 0 },

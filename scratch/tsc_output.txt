@@ -1,0 +1,17 @@
+src/billing/billing.controller.ts(53,17): error TS1272: A type referenced in a decorated signature must be imported with 'import type' or a namespace import when 'isolatedModules' and 'emitDecoratorMetadata' are enabled.
+src/billing/billing.service.ts(18,9): error TS2322: Type '"2025-02-24.acacia"' is not assignable to type '"2026-05-27.dahlia"'.
+src/cashflow/cashflow.service.ts(259,65): error TS2554: Expected 1 arguments, but got 2.
+src/orders/orders.service.spec.ts(32,7): error TS2353: Object literal may only specify known properties, and 'findOne' does not exist in type '{ create: Mock<any, any, any>; findById: Mock<any, any, any>; find: Mock<any, any, any>; countDocuments: Mock<any, any, any>; findByIdAndDelete: Mock<any, any, any>; }'.
+src/orders/orders.service.spec.ts(42,7): error TS2353: Object literal may only specify known properties, and 'findOne' does not exist in type '{ findById: Mock<any, any, any>; find: Mock<any, any, any>; }'.
+src/orders/orders.service.ts(140,89): error TS2554: Expected 1 arguments, but got 2.
+src/purchases/purchases.controller.ts(50,49): error TS2554: Expected 1-2 arguments, but got 3.
+src/purchases/purchases.controller.ts(55,62): error TS2554: Expected 2-3 arguments, but got 4.
+src/purchases/purchases.controller.ts(71,7): error TS2554: Expected 1-2 arguments, but got 3.
+src/purchases/purchases.controller.ts(105,9): error TS2554: Expected 2-3 arguments, but got 4.
+src/purchases/purchases.controller.ts(109,75): error TS2554: Expected 2-3 arguments, but got 4.
+src/purchases/purchases.controller.ts(119,45): error TS2554: Expected 1 arguments, but got 2.
+src/purchases/purchases.controller.ts(128,48): error TS2554: Expected 2 arguments, but got 3.
+src/purchases/purchases.controller.ts(133,44): error TS2554: Expected 1 arguments, but got 2.
+src/whatsapp/inbound-message.processor.ts(64,52): error TS2554: Expected 1 arguments, but got 2.
+src/whatsapp/inbound-message.processor.ts(116,52): error TS2345: Argument of type 'string' is not assignable to parameter of type 'CreatePurchaseDto'.
+test/app.e2e-spec.ts(7,29): error TS2304: Cannot find name 'App'.

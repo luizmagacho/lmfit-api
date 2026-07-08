@@ -64,24 +64,51 @@ export class ProductionService {
     };
   }
 
-  async create(dto: CreateProductionBatchDto) {
-    const computed = this.computeCosts(dto);
+  async create(tenantId: string, dto: CreateProductionBatchDto) {
+    let finalDto = { ...dto };
+
+    // Auto-copy inputs and costs from a previous batch if none provided
+    if ((!finalDto.inputs || finalDto.inputs.length === 0) && finalDto.sku) {
+      const lastBatch = await this.model
+        .findOne({ tenantId, sku: finalDto.sku })
+        .sort({ createdAt: -1 })
+        .lean();
+
+      if (lastBatch && lastBatch.batchQty > 0) {
+        const ratio = (finalDto.batchQty ?? 1) / lastBatch.batchQty;
+        finalDto.inputs = (lastBatch.inputs || []).map((i) => ({
+          description: i.description,
+          inputType: i.inputType,
+          unit: i.unit,
+          unitPrice: i.unitPrice,
+          quantity: Number((i.quantity * ratio).toFixed(3)),
+          totalCost: Number((i.quantity * ratio * i.unitPrice).toFixed(2)),
+        }));
+        finalDto.cuttingCost = Number(((lastBatch.cuttingCost || 0) * ratio).toFixed(2));
+        finalDto.sewingCost = Number(((lastBatch.sewingCost || 0) * ratio).toFixed(2));
+        finalDto.overheadPercent = lastBatch.overheadPercent || 0;
+        finalDto.targetMarginPercent = lastBatch.targetMarginPercent || 60;
+      }
+    }
+
+    const computed = this.computeCosts(finalDto);
     const doc = await this.model.create({
-      name: dto.name,
-      sku: dto.sku,
-      batchQty: dto.batchQty,
-      status: dto.status ?? 'Planejado',
-      inputs: (dto.inputs ?? []).map((i) => ({
+      tenantId,
+      name: finalDto.name,
+      sku: finalDto.sku,
+      batchQty: finalDto.batchQty,
+      status: finalDto.status ?? 'Planejado',
+      inputs: (finalDto.inputs ?? []).map((i) => ({
         ...i,
         totalCost: i.totalCost ?? i.quantity * i.unitPrice,
       })),
-      cuttingCost: dto.cuttingCost ?? 0,
-      sewingCost: dto.sewingCost ?? 0,
-      overheadPercent: dto.overheadPercent ?? 0,
-      targetMarginPercent: dto.targetMarginPercent ?? 60,
-      notes: dto.notes,
-      imageUrl: dto.imageUrl,
-      dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+      cuttingCost: finalDto.cuttingCost ?? 0,
+      sewingCost: finalDto.sewingCost ?? 0,
+      overheadPercent: finalDto.overheadPercent ?? 0,
+      targetMarginPercent: finalDto.targetMarginPercent ?? 60,
+      notes: finalDto.notes,
+      imageUrl: finalDto.imageUrl,
+      dueDate: finalDto.dueDate ? new Date(finalDto.dueDate) : undefined,
       ...computed,
     });
     if (doc.status === 'Concluído' || doc.status === 'Pronto') {
@@ -90,9 +117,9 @@ export class ProductionService {
     return doc;
   }
 
-  async findAll(page: number, limit: number, search?: string, status?: string) {
+  async findAll(tenantId: string, page: number, limit: number, search?: string, status?: string) {
     const skip = skipFromPage(page, limit);
-    const q: Record<string, unknown> = {};
+    const q: Record<string, unknown> = { tenantId };
     if (status) q.status = status;
     if (search) {
       q.$or = [
@@ -109,8 +136,8 @@ export class ProductionService {
   }
 
   /** Retorna todos os lotes agrupados por status (para o Kanban) */
-  async findKanban() {
-    const all = await this.model.find().sort({ createdAt: -1 }).lean().exec();
+  async findKanban(tenantId: string) {
+    const all = await this.model.find({ tenantId }).sort({ createdAt: -1 }).lean().exec();
     const grouped: Record<string, typeof all> = {};
     for (const batch of all) {
       const s = batch.status ?? 'Planejado';
@@ -121,19 +148,19 @@ export class ProductionService {
   }
 
   /** Lista todos os status distintos existentes */
-  async getDistinctStatuses(): Promise<string[]> {
-    const statuses = await this.model.distinct('status').exec() as string[];
+  async getDistinctStatuses(tenantId: string): Promise<string[]> {
+    const statuses = await this.model.distinct('status', { tenantId }).exec() as string[];
     return statuses.sort();
   }
 
-  async findOne(id: string) {
-    const doc = await this.model.findById(id).lean().exec();
+  async findOne(tenantId: string, id: string) {
+    const doc = await this.model.findOne({ _id: id, tenantId }).lean().exec();
     if (!doc) throw new NotFoundException('Lote de produção não encontrado');
     return doc;
   }
 
-  async update(id: string, dto: UpdateProductionBatchDto) {
-    const existing = await this.model.findById(id).lean().exec();
+  async update(tenantId: string, id: string, dto: UpdateProductionBatchDto) {
+    const existing = await this.model.findOne({ _id: id, tenantId }).lean().exec();
     if (!existing) throw new NotFoundException('Lote de produção não encontrado');
 
     // Merge para recalcular custos com dados atualizados
@@ -166,13 +193,14 @@ export class ProductionService {
     if (dto.imageUrl !== undefined) payload.imageUrl = dto.imageUrl;
     if (dto.dueDate !== undefined) payload.dueDate = new Date(dto.dueDate);
 
-    const oldDoc = await this.model.findById(id).lean().exec();
-    if (!oldDoc) throw new NotFoundException('Lote de produção não encontrado');
-    if (oldDoc.status === 'Concluído' || oldDoc.status === 'Pronto') {
-      await this.adjustStock(oldDoc as any, -1);
+    if (existing.status === 'Concluído' || existing.status === 'Pronto') {
+      await this.adjustStock(existing as any, -1);
     }
 
-    const doc = await this.model.findByIdAndUpdate(id, payload, { new: true }).lean().exec();
+    const doc = await this.model
+      .findOneAndUpdate({ _id: id, tenantId }, { $set: payload }, { new: true })
+      .lean()
+      .exec();
     if (!doc) throw new NotFoundException();
 
     if (doc.status === 'Concluído' || doc.status === 'Pronto') {
@@ -181,13 +209,15 @@ export class ProductionService {
     return doc;
   }
 
-  async remove(id: string) {
-    const oldDoc = await this.model.findById(id).lean().exec();
-    if (oldDoc && (oldDoc.status === 'Concluído' || oldDoc.status === 'Pronto')) {
-      await this.adjustStock(oldDoc as any, -1);
+  async remove(tenantId: string, id: string) {
+    const existing = await this.model.findOne({ _id: id, tenantId }).lean().exec();
+    if (!existing) throw new NotFoundException('Lote de produção não encontrado');
+
+    if (existing.status === 'Concluído' || existing.status === 'Pronto') {
+      await this.adjustStock(existing as any, -1);
     }
-    const res = await this.model.findByIdAndDelete(id).exec();
-    if (!res) throw new NotFoundException();
+    const res = await this.model.deleteOne({ _id: id, tenantId }).exec();
+    if (!res.deletedCount) throw new NotFoundException();
     return { deleted: true };
   }
 
@@ -195,7 +225,7 @@ export class ProductionService {
    * Retorna o custo médio por peça ponderado de todos os lotes no período,
    * e o CMV total estimado (usado pelo DRE).
    */
-  async getCmvSummary(from: Date, to: Date) {
+  async getCmvSummary(tenantId: string, from: Date, to: Date) {
     const rows = await this.model
       .aggregate<{
         totalBatchCost: number;

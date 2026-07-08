@@ -14,11 +14,22 @@ import { CloudinaryStorage } from 'multer-storage-cloudinary';
 export const productImageUploadOptions: Options = (() => {
   // Configuração Cloudinary se a URL existir
   if (process.env.CLOUDINARY_URL) {
+    const urlStr = process.env.CLOUDINARY_URL;
+    const matches = urlStr.match(/cloudinary:\/\/([^:]+):([^@]+)@(.+)/);
+    if (matches) {
+      const [, apiKey, apiSecret, cloudName] = matches;
+      cloudinary.config({
+        cloud_name: cloudName,
+        api_key: apiKey,
+        api_secret: apiSecret,
+      });
+    }
+
     // A URL já configura o SDK do cloudinary automaticamente (v2.config)
     const storage = new CloudinaryStorage({
       cloudinary,
       params: {
-        folder: 'lmfit-products',
+        folder: 'kivoni-products',
         allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'],
         format: 'jpg',
         public_id: (_req: Express.Request, file: Express.Multer.File) => {

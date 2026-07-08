@@ -24,6 +24,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { ImportJsonDto } from '../common/dto/import-json.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { TenantId } from '../common/decorators/tenant-id.decorator';
 import type { JwtUserPayload } from '../auth/jwt-user.payload';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -38,8 +39,9 @@ export class UsersController {
 
   @Roles('admin', 'staff')
   @Get()
-  async list(@Query() q: PaginationQueryDto) {
+  async list(@Query() q: PaginationQueryDto, @TenantId() tenantId: string) {
     const { items, total } = await this.users.list(
+      tenantId,
       (q.page - 1) * q.limit,
       q.limit,
       q.search,
@@ -49,12 +51,17 @@ export class UsersController {
 
   @Roles('admin', 'staff')
   @Get('export')
-  async export(@Query('format') format?: string, @Query('search') search?: string) {
+  async export(
+    @Query('format') format: string | undefined,
+    @Query('search') search: string | undefined,
+    @TenantId() tenantId: string,
+  ) {
     const fmt = (format ?? 'xlsx').toLowerCase();
     if (fmt !== 'xlsx' && fmt !== 'csv') {
       throw new BadRequestException({ message: 'format must be xlsx or csv' });
     }
     const { buffer, filename, mime } = await this.users.exportBuffer(
+      tenantId,
       fmt as 'xlsx' | 'csv',
       search,
     );
@@ -73,6 +80,7 @@ export class UsersController {
   async importStaff(
     @Req() req: Request,
     @CurrentUser() user: JwtUserPayload,
+    @TenantId() tenantId: string,
     @Body() body: ImportJsonDto | Record<string, never>,
     @UploadedFile() file: { buffer: Buffer } | undefined,
     @Query('dryRun') dryRunQ?: string,
@@ -86,10 +94,10 @@ export class UsersController {
           message: 'JSON body must include items[]',
         });
       }
-      return this.users.importFromJson(b.items, b.dryRun ?? dryRun, user.sub);
+      return this.users.importFromJson(tenantId, b.items, b.dryRun ?? dryRun, user.sub);
     }
     if (file?.buffer?.length) {
-      return this.users.importFromXlsx(file.buffer, dryRun, user.sub);
+      return this.users.importFromXlsx(tenantId, file.buffer, dryRun, user.sub);
     }
     throw new BadRequestException({
       message:
@@ -102,8 +110,9 @@ export class UsersController {
   create(
     @Body() dto: CreateUserDto,
     @CurrentUser() user: JwtUserPayload,
+    @TenantId() tenantId: string,
   ) {
-    return this.users.create({
+    return this.users.create(tenantId, {
       email: dto.email,
       password: dto.password,
       name: dto.name,
@@ -114,8 +123,8 @@ export class UsersController {
 
   @Roles('admin', 'staff')
   @Get(':id')
-  getOne(@Param('id') id: string) {
-    return this.users.findByIdPublic(id).then((u) => {
+  getOne(@Param('id') id: string, @TenantId() tenantId: string) {
+    return this.users.findByIdPublic(tenantId, id).then((u) => {
       if (!u) throw new NotFoundException();
       return u;
     });
@@ -123,13 +132,17 @@ export class UsersController {
 
   @Roles('admin')
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
-    return this.users.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateUserDto,
+    @TenantId() tenantId: string,
+  ) {
+    return this.users.update(tenantId, id, dto);
   }
 
   @Roles('admin')
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.users.remove(id);
+  remove(@Param('id') id: string, @TenantId() tenantId: string) {
+    return this.users.remove(tenantId, id);
   }
 }
