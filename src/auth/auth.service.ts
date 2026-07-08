@@ -27,8 +27,8 @@ export class AuthService {
     return createHash('sha256').update(raw).digest('hex');
   }
 
-  async login(email: string, password: string) {
-    const user = await this.users.findByEmail(email);
+  async login(tenantId: string, email: string, password: string) {
+    const user = await this.users.findByEmail(tenantId, email);
     if (!user) throw new UnauthorizedException('Invalid credentials');
     const ok = await argon2.verify(user.passwordHash, password);
     if (!ok) throw new UnauthorizedException('Invalid credentials');
@@ -41,6 +41,7 @@ export class AuthService {
       userId: user._id as Types.ObjectId,
       tokenHash,
       expiresAt,
+      tenantId: user.tenantId as Types.ObjectId,
     });
 
     const role = normalizeRoleForJwt(user.role as UserRole);
@@ -48,6 +49,7 @@ export class AuthService {
       sub: String(user._id),
       email: user.email,
       role,
+      tenantId: String(user.tenantId),
     };
     const accessToken = await this.jwt.signAsync(
       { ...payload },
@@ -65,6 +67,7 @@ export class AuthService {
         email: user.email,
         name: user.name,
         role,
+        tenantId: String(user.tenantId),
       },
     };
   }
@@ -77,7 +80,7 @@ export class AuthService {
     }
     await this.refreshModel.deleteOne({ _id: doc._id }).exec();
 
-    const user = await this.users.findById(String(doc.userId));
+    const user = await this.users.findById(undefined, String(doc.userId));
     if (!user) throw new UnauthorizedException('User not found');
 
     const rawRefresh = randomBytes(48).toString('base64url');
@@ -88,6 +91,7 @@ export class AuthService {
       userId: user._id as Types.ObjectId,
       tokenHash: newHash,
       expiresAt,
+      tenantId: user.tenantId as Types.ObjectId,
     });
 
     const role = normalizeRoleForJwt(user.role as UserRole);
@@ -95,6 +99,7 @@ export class AuthService {
       sub: String(user._id),
       email: user.email,
       role,
+      tenantId: String(user.tenantId),
     };
     const accessToken = await this.jwt.signAsync(
       { ...payload },
@@ -112,6 +117,7 @@ export class AuthService {
         email: user.email,
         name: user.name,
         role,
+        tenantId: String(user.tenantId),
       },
     };
   }
@@ -123,13 +129,14 @@ export class AuthService {
   }
 
   async me(userId: string) {
-    const user = await this.users.findById(userId);
+    const user = await this.users.findById(undefined, userId);
     if (!user) throw new UnauthorizedException();
     return {
       id: String(user._id),
       email: user.email,
       name: user.name,
       role: normalizeRoleForJwt(user.role as UserRole),
+      tenantId: String(user.tenantId),
     };
   }
 }

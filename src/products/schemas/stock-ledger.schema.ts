@@ -13,6 +13,9 @@ export type StockLedgerDocument = HydratedDocument<StockLedger>;
 
 @Schema({ timestamps: true })
 export class StockLedger {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   @Prop({ type: Types.ObjectId, ref: 'ProductVariant', required: true, index: true })
   variantId: Types.ObjectId;
 

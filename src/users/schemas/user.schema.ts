@@ -25,7 +25,10 @@ export type UserDocument = HydratedDocument<User>;
 
 @Schema({ timestamps: true })
 export class User {
-  @Prop({ required: true, unique: true, lowercase: true, trim: true })
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
+  @Prop({ required: true, lowercase: true, trim: true })
   email: string;
 
   @Prop({ required: true })
@@ -42,4 +45,4 @@ export class User {
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
-UserSchema.index({ email: 1 }, { unique: true });
+UserSchema.index({ tenantId: 1, email: 1 }, { unique: true });

@@ -22,6 +22,7 @@ export class CashflowService {
   ) {}
 
   async importBatch(
+    tenantId: string,
     dto: CreateCashflowImportDto,
     createdById?: string,
   ) {
@@ -31,6 +32,7 @@ export class CashflowService {
       : undefined;
 
     const docs = dto.transactions.map((tx) => ({
+      tenantId: new Types.ObjectId(tenantId),
       date: new Date(tx.date),
       hour: tx.hour,
       type: tx.type,
@@ -49,6 +51,7 @@ export class CashflowService {
     // Optionally trigger AI analysis in background (non-blocking)
     if (dto.analyzeWithAi) {
       void this.analyzeEntireBatch(
+        tenantId,
         batchId,
         inserted.map((d) => String(d._id)),
       ).catch((e: unknown) => {
@@ -59,8 +62,9 @@ export class CashflowService {
     return { importBatch: batchId, count: inserted.length };
   }
 
-  async createEntry(dto: CreateCashflowEntryDto, createdById?: string) {
+  async createEntry(tenantId: string, dto: CreateCashflowEntryDto, createdById?: string) {
     const doc = await this.model.create({
+      tenantId: new Types.ObjectId(tenantId),
       date: new Date(dto.date),
       hour: dto.hour,
       type: dto.type,
@@ -76,7 +80,7 @@ export class CashflowService {
     return doc;
   }
 
-  async updateEntry(id: string, dto: UpdateCashflowEntryDto) {
+  async updateEntry(tenantId: string, id: string, dto: UpdateCashflowEntryDto) {
     const patch: Record<string, unknown> = {};
     if (dto.date) patch.date = new Date(dto.date);
     if (dto.hour !== undefined) patch.hour = dto.hour;
@@ -87,16 +91,23 @@ export class CashflowService {
     if (dto.customerId !== undefined) patch.customerId = dto.customerId ? new Types.ObjectId(dto.customerId) : null;
     if (dto.supplierId !== undefined) patch.supplierId = dto.supplierId ? new Types.ObjectId(dto.supplierId) : null;
 
-    const doc = await this.model.findByIdAndUpdate(id, patch, { new: true }).exec();
+    const doc = await this.model.findOneAndUpdate(
+      { _id: id, tenantId: new Types.ObjectId(tenantId) },
+      patch,
+      { new: true }
+    ).exec();
     return doc;
   }
 
-  async removeEntry(id: string) {
-    const doc = await this.model.findByIdAndDelete(id).exec();
+  async removeEntry(tenantId: string, id: string) {
+    const doc = await this.model.findOneAndDelete({
+      _id: id,
+      tenantId: new Types.ObjectId(tenantId),
+    }).exec();
     return { deleted: !!doc };
   }
 
-  async findAll(opts: {
+  async findAll(tenantId: string, opts: {
     page: number;
     limit: number;
     from?: string;
@@ -105,7 +116,9 @@ export class CashflowService {
     importBatch?: string;
   }) {
     const skip = skipFromPage(opts.page, opts.limit);
-    const filter: Record<string, unknown> = {};
+    const filter: Record<string, unknown> = {
+      tenantId: new Types.ObjectId(tenantId),
+    };
 
     if (opts.from || opts.to) {
       filter['date'] = {
@@ -129,8 +142,10 @@ export class CashflowService {
     return { items, total, page: opts.page, limit: opts.limit };
   }
 
-  async summary(from?: string, to?: string) {
-    const matchDate: Record<string, unknown> = {};
+  async summary(tenantId: string, from?: string, to?: string) {
+    const matchDate: Record<string, unknown> = {
+      tenantId: new Types.ObjectId(tenantId),
+    };
     if (from || to) {
       matchDate['date'] = {
         ...(from ? { $gte: new Date(from) } : {}),
@@ -199,8 +214,9 @@ export class CashflowService {
     };
   }
 
-  async listBatches() {
+  async listBatches(tenantId: string) {
     return this.model.aggregate([
+      { $match: { tenantId: new Types.ObjectId(tenantId) } },
       {
         $group: {
           _id: '$importBatch',
@@ -221,13 +237,16 @@ export class CashflowService {
     ]);
   }
 
-  async removeBatch(batchId: string) {
-    const res = await this.model.deleteMany({ importBatch: batchId });
+  async removeBatch(tenantId: string, batchId: string) {
+    const res = await this.model.deleteMany({
+      importBatch: batchId,
+      tenantId: new Types.ObjectId(tenantId),
+    });
     return { deleted: res.deletedCount };
   }
 
-  async analyzeEntry(id: string) {
-    const entry = await this.model.findById(id).lean();
+  async analyzeEntry(tenantId: string, id: string) {
+    const entry = await this.model.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).lean();
     if (!entry) return null;
 
     const text = `Transação financeira de uma loja de moda fitness brasileira:
@@ -238,18 +257,21 @@ Valor: R$ ${Math.abs(entry.amount).toFixed(2)} (${entry.amount >= 0 ? 'entrada' 
 Data: ${entry.date.toLocaleDateString('pt-BR')}`;
 
     const analysis = await this.gemini.analyzeTransaction(text);
-    await this.model.findByIdAndUpdate(id, { aiAnalysis: analysis });
+    await this.model.findOneAndUpdate(
+      { _id: id, tenantId: new Types.ObjectId(tenantId) },
+      { aiAnalysis: analysis }
+    );
     return analysis;
   }
 
-  async analyzeEntireBatch(batchId: string, ids: string[]) {
+  async analyzeEntireBatch(tenantId: string, batchId: string, ids: string[]) {
     const CONCURRENCY = 3;
     const chunks: string[][] = [];
     for (let i = 0; i < ids.length; i += CONCURRENCY) {
       chunks.push(ids.slice(i, i + CONCURRENCY));
     }
     for (const chunk of chunks) {
-      await Promise.all(chunk.map((id) => this.analyzeEntry(id).catch(() => null)));
+      await Promise.all(chunk.map((id) => this.analyzeEntry(tenantId, id).catch(() => null)));
     }
     this.log.log(`Batch ${batchId}: AI analysis complete (${ids.length} entries)`);
   }

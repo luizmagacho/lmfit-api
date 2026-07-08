@@ -45,7 +45,7 @@ export class OrdersService {
     private readonly products: ProductsService,
     private readonly purchases: PurchasesService,
     @Inject(forwardRef(() => PaymentsService))
-    private readonly payments: PaymentsService,
+    private readonly payments: any,
   ) {}
 
   private assertLinesRequiredForStatus(status: string, lines: Order['lines']) {
@@ -84,6 +84,7 @@ export class OrdersService {
   }
 
   private async resolveLines(
+    tenantId: string,
     inputs?: OrderLineInputDto[],
   ): Promise<{ lines: Order['lines']; total: number }> {
     if (!inputs?.length) {
@@ -95,7 +96,10 @@ export class OrdersService {
       if (!Types.ObjectId.isValid(line.variantId)) {
         throw new BadRequestException(`Variante inválida ${line.variantId}`);
       }
-      const v = await this.variantModel.findById(line.variantId).exec();
+      const v = await this.variantModel.findOne({
+        _id: line.variantId,
+        tenantId: new Types.ObjectId(tenantId),
+      }).exec();
       if (!v) {
         throw new BadRequestException(`Variante não encontrada ${line.variantId}`);
       }
@@ -107,18 +111,20 @@ export class OrdersService {
         unitPrice,
         productionPrice: line.productionPrice || 0,
         description: line.description,
+        isOrder: line.isOrder || false,
       });
     }
     return { lines, total: sum };
   }
 
   private async loadVariantsByIds(
+    tenantId: string,
     variantIds: Types.ObjectId[],
   ): Promise<Map<string, ProductVariant>> {
     const map = new Map<string, ProductVariant>();
     if (!variantIds.length) return map;
     const docs = await this.variantModel
-      .find({ _id: { $in: variantIds } })
+      .find({ _id: { $in: variantIds }, tenantId: new Types.ObjectId(tenantId) })
       .lean()
       .exec();
     for (const d of docs) {
@@ -127,14 +133,16 @@ export class OrdersService {
     return map;
   }
 
-  private async buildWarnings(lines: Order['lines']): Promise<OrderWarning[]> {
+  private async buildWarnings(tenantId: string, lines: Order['lines']): Promise<OrderWarning[]> {
     const warnings: OrderWarning[] = [];
     if (!lines?.length) return warnings;
     const ids = [...new Set(lines.map((l) => l.variantId))];
-    const variants = await this.loadVariantsByIds(ids);
+    const variants = await this.loadVariantsByIds(tenantId, ids);
     const pendingMap = await this.purchases.sumPendingOutstandingByVariantIds(ids);
 
     for (const line of lines) {
+      if ((line as any).isOrder) continue;
+
       const vid = String(line.variantId);
       const v = variants.get(vid);
       if (!v) continue;
@@ -163,20 +171,20 @@ export class OrdersService {
     return warnings;
   }
 
-  /** Agrupa quantidade por variante para checagem de estoque físico. */
   private groupedQuantities(lines: Order['lines']): Map<string, number> {
     const m = new Map<string, number>();
     for (const line of lines) {
+      if ((line as any).isOrder) continue;
       const k = String(line.variantId);
       m.set(k, (m.get(k) ?? 0) + line.quantity);
     }
     return m;
   }
 
-  private async assertStockSufficientForPay(lines: Order['lines']) {
+  private async assertStockSufficientForPay(tenantId: string, lines: Order['lines']) {
     if (!lines.length) return;
     const ids = lines.map((l) => l.variantId);
-    const variants = await this.loadVariantsByIds(ids);
+    const variants = await this.loadVariantsByIds(tenantId, ids);
     const grouped = this.groupedQuantities(lines);
     const conflicts: Array<{
       variantId: string;
@@ -213,10 +221,10 @@ export class OrdersService {
     return { ...doc, warnings } as OrderResponse;
   }
 
-  async create(dto: CreateOrderDto, createdBy?: string): Promise<OrderResponse> {
+  async create(tenantId: string, dto: CreateOrderDto, createdBy?: string): Promise<OrderResponse> {
     const status = dto.status ?? 'open';
     const channel = dto.channel ?? 'online';
-    const { lines, total: computedTotal } = await this.resolveLines(dto.lines);
+    const { lines, total: computedTotal } = await this.resolveLines(tenantId, dto.lines);
 
     this.assertLinesRequiredForStatus(status, lines);
     this.assertDraftMayHaveEmptyLines(status, lines);
@@ -228,15 +236,16 @@ export class OrdersService {
       total = dto.total;
     }
 
-    const warnings = await this.buildWarnings(lines);
+    const warnings = await this.buildWarnings(tenantId, lines);
 
     if (isStockAppliedStatus(status)) {
-      await this.assertStockSufficientForPay(lines);
+      await this.assertStockSufficientForPay(tenantId, lines);
     }
 
-    const nextNumber = (await this.model.countDocuments().exec()) + 1;
+    const nextNumber = (await this.model.countDocuments({ tenantId: new Types.ObjectId(tenantId) }).exec()) + 1;
 
     const created = await this.model.create({
+      tenantId: new Types.ObjectId(tenantId),
       customerId: new Types.ObjectId(dto.customerId),
       number: nextNumber,
       channel,
@@ -254,11 +263,13 @@ export class OrdersService {
     });
 
     const oid = created._id as Types.ObjectId;
-    if (isStockAppliedStatus(status) && lines.length) {
+    const stockLines = lines.filter(l => !(l as any).isOrder);
+    if (isStockAppliedStatus(status) && stockLines.length) {
       await this.products.applySaleDeductionsForOrder(
         oid,
-        lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
+        stockLines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
         createdBy,
+        tenantId,
       );
     }
 
@@ -268,8 +279,8 @@ export class OrdersService {
     );
   }
 
-  private listFilter(search?: string, channel?: string) {
-    const parts: Record<string, unknown>[] = [];
+  private listFilter(tenantId: string, search?: string, channel?: string) {
+    const parts: Record<string, unknown>[] = [{ tenantId: new Types.ObjectId(tenantId) }];
     if (search) {
       parts.push({
         $or: [
@@ -281,19 +292,18 @@ export class OrdersService {
     if (channel && (ORDER_CHANNELS as readonly string[]).includes(channel)) {
       parts.push({ channel });
     }
-    if (!parts.length) return {};
-    if (parts.length === 1) return parts[0];
     return { $and: parts };
   }
 
   async findAll(
+    tenantId: string,
     page: number,
     limit: number,
     search?: string,
     channel?: string,
   ) {
     const skip = skipFromPage(page, limit);
-    const q = this.listFilter(search, channel);
+    const q = this.listFilter(tenantId, search, channel);
     const [items, total] = await Promise.all([
       this.model.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       this.model.countDocuments(q).exec(),
@@ -301,8 +311,8 @@ export class OrdersService {
     return { items, total, page, limit };
   }
 
-  async findAllForExport(search?: string, channel?: string) {
-    const q = this.listFilter(search, channel);
+  async findAllForExport(tenantId: string, search?: string, channel?: string) {
+    const q = this.listFilter(tenantId, search, channel);
     return this.model.find(q).sort({ createdAt: -1 }).lean().exec();
   }
 
@@ -321,11 +331,12 @@ export class OrdersService {
   }
 
   async exportBuffer(
+    tenantId: string,
     format: 'xlsx' | 'csv',
     search?: string,
     channel?: string,
   ): Promise<{ buffer: Buffer; filename: string; mime: string }> {
-    const docs = await this.findAllForExport(search, channel);
+    const docs = await this.findAllForExport(tenantId, search, channel);
     const rows = docs.map((d) =>
       this.serializeRow(d as unknown as Record<string, unknown>),
     );
@@ -416,14 +427,16 @@ export class OrdersService {
   }
 
   async importFromJson(
+    tenantId: string,
     items: Record<string, unknown>[],
     dryRun: boolean,
     createdBy?: string,
   ): Promise<StaffImportResponse> {
-    return this.importRecords(items, dryRun, createdBy);
+    return this.importRecords(tenantId, items, dryRun, createdBy);
   }
 
   async importFromXlsx(
+    tenantId: string,
     buffer: Buffer,
     dryRun: boolean,
     createdBy?: string,
@@ -432,10 +445,11 @@ export class OrdersService {
       buffer,
       orderImportHeaderAliases(),
     );
-    return this.importRecords(records, dryRun, createdBy);
+    return this.importRecords(tenantId, records, dryRun, createdBy);
   }
 
   private async importRecords(
+    tenantId: string,
     items: Record<string, unknown>[],
     dryRun: boolean,
     createdBy?: string,
@@ -451,7 +465,7 @@ export class OrdersService {
         const { id, create, patch } = this.parseRow(items[i]);
         if (dryRun) {
           if (id && Types.ObjectId.isValid(id)) {
-            const exists = await this.model.findById(id).lean().exec();
+            const exists = await this.model.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).lean().exec();
             if (!exists) {
               errors.push({
                 row: rowNum,
@@ -462,12 +476,12 @@ export class OrdersService {
           continue;
         }
         if (id && Types.ObjectId.isValid(id)) {
-          const exists = await this.model.findById(id).exec();
+          const exists = await this.model.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).exec();
           if (!exists) {
             errors.push({ row: rowNum, message: `_id não encontrado: ${id}` });
             continue;
           }
-          await this.update(id, patch, createdBy);
+          await this.update(tenantId, id, patch, createdBy);
           updated++;
         } else {
           if (!create) {
@@ -477,7 +491,7 @@ export class OrdersService {
             });
             continue;
           }
-          await this.create(create, createdBy);
+          await this.create(tenantId, create, createdBy);
           imported++;
         }
       } catch (e) {
@@ -517,21 +531,22 @@ export class OrdersService {
     };
   }
 
-  async findOne(id: string): Promise<OrderResponse> {
+  async findOne(tenantId: string, id: string): Promise<OrderResponse> {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
-    const doc = await this.model.findById(id).lean().exec();
+    const doc = await this.model.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).lean().exec();
     if (!doc) throw new NotFoundException();
-    const warnings = await this.buildWarnings(doc.lines ?? []);
+    const warnings = await this.buildWarnings(tenantId, doc.lines ?? []);
     return this.toResponse(doc as unknown as Record<string, unknown>, warnings);
   }
 
   async update(
+    tenantId: string,
     id: string,
     dto: UpdateOrderDto,
     createdBy?: string,
   ): Promise<OrderResponse> {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
-    const existing = await this.model.findById(id).exec();
+    const existing = await this.model.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).exec();
     if (!existing) throw new NotFoundException();
 
     this.assertLinesNotEditableWhenLocked(existing.status, dto);
@@ -541,7 +556,7 @@ export class OrdersService {
     let total = existing.total;
 
     if (dto.lines !== undefined) {
-      const resolved = await this.resolveLines(dto.lines);
+      const resolved = await this.resolveLines(tenantId, dto.lines);
       lines = resolved.lines;
       total = resolved.lines.length
         ? resolved.total
@@ -556,13 +571,13 @@ export class OrdersService {
     this.assertLinesRequiredForStatus(newStatus, lines);
     this.assertDraftMayHaveEmptyLines(newStatus, lines);
 
-    const warnings = await this.buildWarnings(lines);
+    const warnings = await this.buildWarnings(tenantId, lines);
 
     const wasApplied = isStockAppliedStatus(oldStatus);
     const willApply = isStockAppliedStatus(newStatus);
 
     if (!wasApplied && willApply) {
-      await this.assertStockSufficientForPay(lines);
+      await this.assertStockSufficientForPay(tenantId, lines);
     }
 
     if (wasApplied && !willApply) {
@@ -573,11 +588,13 @@ export class OrdersService {
       );
     }
 
-    if (!wasApplied && willApply && lines.length) {
+    const stockLines = lines.filter(l => !(l as any).isOrder);
+    if (!wasApplied && willApply && stockLines.length) {
       await this.products.applySaleDeductionsForOrder(
         existing._id as Types.ObjectId,
-        lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
+        stockLines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
         createdBy,
+        tenantId,
       );
     }
 
@@ -599,23 +616,24 @@ export class OrdersService {
     await existing.save();
 
     if (!wasApplied && willApply && newStatus === 'completed') {
-      await this.payments.syncPaymentPaidForOrder(existing._id as Types.ObjectId);
+      await this.payments.syncPaymentPaidForOrder(tenantId, existing._id as Types.ObjectId);
     }
     if (
       newStatus === 'cancelled' &&
       oldStatus === 'open' &&
       !wasApplied
     ) {
-      await this.payments.cancelPendingForOrder(existing._id as Types.ObjectId);
+      await this.payments.cancelPendingForOrder(tenantId, existing._id as Types.ObjectId);
     }
 
     const lean = existing.toObject();
     return this.toResponse(lean as unknown as Record<string, unknown>, warnings);
   }
 
-  async createFromPublic(dto: CreatePublicOrderDto): Promise<Record<string, unknown>> {
+  async createFromPublic(tenantId: string, dto: CreatePublicOrderDto): Promise<Record<string, unknown>> {
     if (dto.payment?.method === 'pix') {
       const res = await this.create(
+        tenantId,
         {
           customerId: dto.customerId,
           channel: dto.channel ?? 'online',
@@ -627,7 +645,7 @@ export class OrdersService {
         undefined,
       );
       const total = Number(res.total ?? 0);
-      const pay = await this.payments.createPixPayment(String(res._id), total);
+      const pay = await this.payments.createPixPayment(tenantId, String(res._id), total);
       return {
         orderId: String(res._id),
         warnings: res.warnings,
@@ -640,6 +658,7 @@ export class OrdersService {
       };
     }
     const res = await this.create(
+      tenantId,
       {
         customerId: dto.customerId,
         channel: dto.channel ?? 'online',
@@ -653,19 +672,23 @@ export class OrdersService {
     return { orderId: String(res._id), warnings: res.warnings };
   }
 
-  async remove(id: string) {
+  async remove(tenantId: string, id: string) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
-    const doc = await this.model.findById(id).exec();
+    const doc = await this.model.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).exec();
     if (!doc) throw new NotFoundException();
     if (doc.status === 'open') {
-      await this.payments.cancelPendingForOrder(doc._id as Types.ObjectId);
+      await this.payments.cancelPendingForOrder(tenantId, doc._id as Types.ObjectId);
     }
     if (isStockAppliedStatus(doc.status) && (doc.lines?.length ?? 0) > 0) {
-      await this.products.applySaleReversalsForOrder(
-        doc._id as Types.ObjectId,
-        (doc.lines ?? []).map((l) => ({ variantId: l.variantId })),
-        undefined,
-      );
+      const stockLines = (doc.lines ?? []).filter(l => !(l as any).isOrder);
+      if (stockLines.length > 0) {
+        await this.products.applySaleReversalsForOrder(
+          doc._id as Types.ObjectId,
+          stockLines.map((l) => ({ variantId: l.variantId })),
+          undefined,
+          tenantId,
+        );
+      }
     }
     await doc.deleteOne();
     return { deleted: true };

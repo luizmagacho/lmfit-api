@@ -45,7 +45,7 @@ jobs:
           key: ${{ secrets.DROPLET_SSH_KEY }}
           script: |
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            cd /opt/lmfit-api
+            cd /opt/kivoni-api
             docker compose pull
             docker compose up -d
             docker image prune -f

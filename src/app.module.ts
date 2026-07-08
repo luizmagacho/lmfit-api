@@ -1,8 +1,9 @@
 import { join } from 'path';
-import { Module } from '@nestjs/common';
+import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { MongooseModule } from '@nestjs/mongoose';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
@@ -12,6 +13,7 @@ import { AuthModule } from './auth/auth.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { ExcelModule } from './common/excel/excel.module';
 import { CustomersModule } from './customers/customers.module';
+import { IntegrationsModule } from './integrations/integrations.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { JwtRegisteredModule } from './jwt/jwt-registered.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -27,10 +29,15 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { CashflowModule } from './cashflow/cashflow.module';
 import { ProductionModule } from './production/production.module';
 import { MaterialsModule } from './materials/materials.module';
+import { BillingModule } from './billing/billing.module';
+import { TenantsModule } from './tenants/tenants.module';
+import { TenantSubscriptionGuard } from './common/guards/tenant-subscription.guard';
+import { TenantMiddleware } from './common/middleware/tenant.middleware';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
     ServeStaticModule.forRoot({
       rootPath: join(process.cwd(), 'uploads'),
@@ -61,6 +68,9 @@ import { MaterialsModule } from './materials/materials.module';
     CashflowModule,
     ProductionModule,
     MaterialsModule,
+    BillingModule,
+    TenantsModule,
+    IntegrationsModule,
   ],
   controllers: [AppController],
   providers: [
@@ -68,6 +78,16 @@ import { MaterialsModule } from './materials/materials.module';
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
     },
+    {
+      provide: APP_GUARD,
+      useClass: TenantSubscriptionGuard,
+    },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(TenantMiddleware)
+      .forRoutes('*');
+  }
+}

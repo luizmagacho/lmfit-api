@@ -9,7 +9,7 @@ import { digitsAsCentsToReais, formatBrlCurrency } from './common/money/brl-mone
 export class AppController {
   @Get('health')
   health() {
-    return { ok: true, service: 'lmfit-api' };
+    return { ok: true, service: 'kivoni-api' };
   }
 
   @ApiTags('utils')

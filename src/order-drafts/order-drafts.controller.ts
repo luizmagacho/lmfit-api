@@ -20,6 +20,7 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { TenantId } from '../common/decorators/tenant-id.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { ImportJsonDto } from '../common/dto/import-json.dto';
 import { CreateStaffOrderDraftDto } from './dto/staff-order-draft.dto';
@@ -35,22 +36,23 @@ export class OrderDraftsController {
   constructor(private readonly drafts: OrderDraftsService) {}
 
   @Post()
-  create(@Body() dto: CreateStaffOrderDraftDto) {
-    return this.drafts.createPublic(dto);
+  create(@TenantId() tenantId: string, @Body() dto: CreateStaffOrderDraftDto) {
+    return this.drafts.createPublic(tenantId, dto);
   }
 
   @Get()
-  list(@Query() q: PaginationQueryDto) {
-    return this.drafts.listForStaff(q.page, q.limit);
+  list(@TenantId() tenantId: string, @Query() q: PaginationQueryDto) {
+    return this.drafts.listForStaff(tenantId, q.page, q.limit);
   }
 
   @Get('export')
-  async export(@Query('format') format?: string) {
+  async export(@TenantId() tenantId: string, @Query('format') format?: string) {
     const fmt = (format ?? 'xlsx').toLowerCase();
     if (fmt !== 'xlsx' && fmt !== 'csv') {
       throw new BadRequestException({ message: 'format must be xlsx or csv' });
     }
     const { buffer, filename, mime } = await this.drafts.exportDraftsBuffer(
+      tenantId,
       fmt as 'xlsx' | 'csv',
     );
     return new StreamableFile(buffer, {
@@ -65,6 +67,7 @@ export class OrderDraftsController {
     FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024 } }),
   )
   async importStaff(
+    @TenantId() tenantId: string,
     @Req() req: Request,
     @Body() body: ImportJsonDto | Record<string, never>,
     @UploadedFile() file: { buffer: Buffer } | undefined,
@@ -79,10 +82,10 @@ export class OrderDraftsController {
           message: 'JSON body must include items[]',
         });
       }
-      return this.drafts.importDraftsFromJson(b.items, b.dryRun ?? dryRun);
+      return this.drafts.importDraftsFromJson(tenantId, b.items, b.dryRun ?? dryRun);
     }
     if (file?.buffer?.length) {
-      return this.drafts.importDraftsFromXlsx(file.buffer, dryRun);
+      return this.drafts.importDraftsFromXlsx(tenantId, file.buffer, dryRun);
     }
     throw new BadRequestException({
       message:
@@ -90,19 +93,22 @@ export class OrderDraftsController {
     });
   }
 
-  /** `:id` is the draft `sessionToken` (URL-encode if needed). */
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.drafts.getByToken(id);
+  findOne(@TenantId() tenantId: string, @Param('id') id: string) {
+    return this.drafts.getByToken(tenantId, id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: StaffPatchOrderDraftDto) {
-    return this.drafts.patchForStaff(id, dto);
+  update(
+    @TenantId() tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: StaffPatchOrderDraftDto,
+  ) {
+    return this.drafts.patchForStaff(tenantId, id, dto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.drafts.removeByTokenForStaff(id);
+  remove(@TenantId() tenantId: string, @Param('id') id: string) {
+    return this.drafts.removeByTokenForStaff(tenantId, id);
   }
 }

@@ -21,10 +21,10 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   }
 
   validate(payload: JwtUserPayload): JwtUserPayload {
-    if (!payload?.sub || !payload.email) {
+    if (!payload?.sub || !payload.email || !payload.tenantId) {
       throw new UnauthorizedException();
     }
     const role = normalizeRoleForJwt(payload.role as UserRole);
-    return { sub: payload.sub, email: payload.email, role };
+    return { sub: payload.sub, email: payload.email, role, tenantId: payload.tenantId };
   }
 }

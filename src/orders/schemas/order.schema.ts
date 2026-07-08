@@ -7,7 +7,9 @@ export type OrderStatus =
   | 'picking'
   | 'shipped'
   | 'completed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'encomendado_pago'
+  | 'encomendado_nao_pago';
 
 export type OrderDocument = HydratedDocument<Order>;
 
@@ -22,12 +24,16 @@ const OrderLineSchema = new MSchema(
     unitPrice: { type: Number, required: true, min: 0 },
     productionPrice: { type: Number, default: 0 },
     description: { type: String },
+    isOrder: { type: Boolean, default: false },
   },
   { _id: false },
 );
 
 @Schema({ timestamps: true })
 export class Order {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   @Prop({ type: Types.ObjectId, ref: 'Customer', required: true })
   customerId: Types.ObjectId;
 
@@ -44,7 +50,7 @@ export class Order {
 
   @Prop({
     type: String,
-    enum: ['open', 'picking', 'shipped', 'completed', 'cancelled'],
+    enum: ['open', 'picking', 'shipped', 'completed', 'cancelled', 'encomendado_pago', 'encomendado_nao_pago'],
     default: 'open',
   })
   status: OrderStatus;
@@ -65,6 +71,7 @@ export class Order {
     unitPrice: number;
     productionPrice?: number;
     description?: string;
+    isOrder?: boolean;
   }>;
 
   @Prop({ type: Types.ObjectId, ref: 'User' })
@@ -79,3 +86,4 @@ export class Order {
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);
+OrderSchema.index({ tenantId: 1, createdAt: -1 });

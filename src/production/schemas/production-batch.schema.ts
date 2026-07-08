@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Schema as MSchema } from 'mongoose';
+import { HydratedDocument, Schema as MSchema, Types } from 'mongoose';
 
 export type ProductionBatchDocument = HydratedDocument<ProductionBatch>;
 
@@ -28,6 +28,9 @@ const InputItemSchema = new MSchema(
 
 @Schema({ timestamps: true })
 export class ProductionBatch {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   /** Nome ou referência do lote (ex: "Legging Preta P/M - Maio 2026") */
   @Prop({ required: true, trim: true })
   name: string;

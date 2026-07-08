@@ -19,6 +19,9 @@ export type AiAnalysis = {
 
 @Schema({ timestamps: true })
 export class CashflowEntry {
+  @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
+  tenantId: Types.ObjectId;
+
   @Prop({ required: true })
   date: Date;
 
@@ -26,6 +29,7 @@ export class CashflowEntry {
   hour?: string;
 
   @Prop({
+    type: String,
     required: true,
     enum: ['deposit_sales', 'pix_received', 'pix_sent', 'other'],
   })
@@ -74,3 +78,5 @@ export class CashflowEntry {
 }
 
 export const CashflowEntrySchema = SchemaFactory.createForClass(CashflowEntry);
+CashflowEntrySchema.index({ tenantId: 1, date: -1 });
+CashflowEntrySchema.index({ tenantId: 1, createdAt: -1 });

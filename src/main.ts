@@ -2,6 +2,7 @@ import { UnprocessableEntityException, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { BrlMoneyResponseInterceptor } from './common/money/brl-money-response.interceptor';
@@ -19,6 +20,7 @@ async function bootstrap() {
   });
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
+  app.use(compression());
   app.use(cookieParser());
   app.useGlobalInterceptors(new BrlMoneyResponseInterceptor());
   app.useGlobalPipes(
@@ -48,10 +50,12 @@ async function bootstrap() {
   const allowedOrigins = [
     webOrigin,
     ...extraOrigins,
-    /^https?:\/\/localhost(:\d+)?$/,
-    /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+    /^https?:\/\/([^.]+\.)?localhost(:\d+)?$/,
+    /^https?:\/\/([^.]+\.)?127\.0\.0\.1(:\d+)?$/,
+    /\.kivo\.app$/,
     /\.vercel\.app$/,
     /^https?:\/\/.*\.lmfit\.com\.br$/,
+    /^https?:\/\/([^.]+\.)?kivoni\.com\.br$/,
   ];
 
   console.log('CORS Allowed Origins:', allowedOrigins.filter(o => typeof o === 'string'));
@@ -66,6 +70,8 @@ async function bootstrap() {
       'Authorization',
       'X-Requested-With',
       'Cookie',
+      'x-tenant-slug',
+      'X-Tenant-Slug',
     ],
     exposedHeaders: ['Content-Disposition'],
   });

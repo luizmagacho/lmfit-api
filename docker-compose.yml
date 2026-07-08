@@ -1,18 +1,18 @@
-# MongoDB for local development (lmfit-api + lmfit-web + lmfit-mobile)
+# MongoDB for local development (kivoni-api + kivoni-web + kivoni-mobile)
 # Usage: docker compose up -d
-# URI: mongodb://127.0.0.1:27017/lmfit  (same as .env.example)
+# URI: mongodb://127.0.0.1:27017/kivoni  (same as .env.example)
 
 services:
   mongo:
     image: mongo:7
-    container_name: lmfit-mongo
+    container_name: kivoni-mongo
     restart: unless-stopped
     ports:
       - "27017:27017"
     volumes:
-      - lmfit_mongo_data:/data/db
+      - kivoni_mongo_data:/data/db
     environment:
-      MONGO_INITDB_DATABASE: lmfit
+      MONGO_INITDB_DATABASE: kivoni
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
       interval: 10s
@@ -21,4 +21,4 @@ services:
       start_period: 20s
 
 volumes:
-  lmfit_mongo_data:
+  kivoni_mongo_data:

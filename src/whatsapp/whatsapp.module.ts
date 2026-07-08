@@ -5,6 +5,7 @@ import { GeminiModule } from '../gemini/gemini.module';
 import { OrdersModule } from '../orders/orders.module';
 import { PurchasesModule } from '../purchases/purchases.module';
 import { SuppliersModule } from '../suppliers/suppliers.module';
+import { TenantsModule } from '../tenants/tenants.module';
 import { InboundMessageProcessor } from './inbound-message.processor';
 import { WhatsAppMessage, WhatsAppMessageSchema } from './schemas/whatsapp-message.schema';
 import { WhatsAppSender, WhatsAppSenderSchema } from './schemas/whatsapp-sender.schema';
@@ -24,6 +25,7 @@ import { WhatsappWebhookController } from './whatsapp-webhook.controller';
     PurchasesModule,
     CustomersModule,
     SuppliersModule,
+    TenantsModule,
   ],
   controllers: [WhatsappWebhookController, WhatsappInternalController],
   providers: [

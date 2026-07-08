@@ -23,6 +23,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { ImportJsonDto } from '../common/dto/import-json.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { TenantId } from '../common/decorators/tenant-id.decorator';
 import type { JwtUserPayload } from '../auth/jwt-user.payload';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
@@ -40,22 +41,31 @@ export class SuppliersController {
   create(
     @Body() dto: CreateSupplierDto,
     @CurrentUser() user: JwtUserPayload,
+    @TenantId() tenantId: string,
   ) {
-    return this.suppliers.create(dto, user.sub);
+    return this.suppliers.create(tenantId, dto, user.sub);
   }
 
   @Get()
-  findAll(@Query() q: PaginationQueryDto) {
-    return this.suppliers.findAll(q.page, q.limit, q.search);
+  findAll(
+    @Query() q: PaginationQueryDto,
+    @TenantId() tenantId: string,
+  ) {
+    return this.suppliers.findAll(tenantId, q.page, q.limit, q.search);
   }
 
   @Get('export')
-  async export(@Query('format') format?: string, @Query('search') search?: string) {
+  async export(
+    @Query('format') format: string | undefined,
+    @Query('search') search: string | undefined,
+    @TenantId() tenantId: string,
+  ) {
     const fmt = (format ?? 'xlsx').toLowerCase();
     if (fmt !== 'xlsx' && fmt !== 'csv') {
       throw new BadRequestException({ message: 'format must be xlsx or csv' });
     }
     const { buffer, filename, mime } = await this.suppliers.exportBuffer(
+      tenantId,
       fmt as 'xlsx' | 'csv',
       search,
     );
@@ -73,6 +83,7 @@ export class SuppliersController {
   async importStaff(
     @Req() req: Request,
     @CurrentUser() user: JwtUserPayload,
+    @TenantId() tenantId: string,
     @Body() body: ImportJsonDto | Record<string, never>,
     @UploadedFile() file: { buffer: Buffer } | undefined,
     @Query('dryRun') dryRunQ?: string,
@@ -87,13 +98,14 @@ export class SuppliersController {
         });
       }
       return this.suppliers.importFromJson(
+        tenantId,
         b.items,
         b.dryRun ?? dryRun,
         user.sub,
       );
     }
     if (file?.buffer?.length) {
-      return this.suppliers.importFromXlsx(file.buffer, dryRun, user.sub);
+      return this.suppliers.importFromXlsx(tenantId, file.buffer, dryRun, user.sub);
     }
     throw new BadRequestException({
       message:
@@ -102,17 +114,27 @@ export class SuppliersController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.suppliers.findOne(id);
+  findOne(
+    @Param('id') id: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.suppliers.findOne(tenantId, id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateSupplierDto) {
-    return this.suppliers.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateSupplierDto,
+    @TenantId() tenantId: string,
+  ) {
+    return this.suppliers.update(tenantId, id, dto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.suppliers.remove(id);
+  remove(
+    @Param('id') id: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.suppliers.remove(tenantId, id);
   }
 }
