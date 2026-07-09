@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { ProductionBatch } from './schemas/production-batch.schema';
 import type { CreateProductionBatchDto } from './dto/create-production-batch.dto';
 import type { UpdateProductionBatchDto } from './dto/update-production-batch.dto';
@@ -15,6 +15,15 @@ export class ProductionService {
     @InjectModel(ProductVariant.name)
     private readonly variantModel: Model<ProductVariant>,
   ) {}
+
+  /**
+   * Filtro de tenant que casa tanto ObjectId (dados migrados/corretos) quanto
+   * string (dados legados gravados sem cast — o pipeline @nestjs/mongoose
+   * degrada `type: Types.ObjectId` para Mixed e não casta na escrita).
+   */
+  private tidFilter(tenantId: string) {
+    return { $in: [new Types.ObjectId(tenantId), tenantId] };
+  }
 
   /**
    * Calcula os custos derivados do lote:
@@ -70,7 +79,7 @@ export class ProductionService {
     // Auto-copy inputs and costs from a previous batch if none provided
     if ((!finalDto.inputs || finalDto.inputs.length === 0) && finalDto.sku) {
       const lastBatch = await this.model
-        .findOne({ tenantId, sku: finalDto.sku })
+        .findOne({ tenantId: this.tidFilter(tenantId), sku: finalDto.sku })
         .sort({ createdAt: -1 })
         .lean();
 
@@ -93,7 +102,7 @@ export class ProductionService {
 
     const computed = this.computeCosts(finalDto);
     const doc = await this.model.create({
-      tenantId,
+      tenantId: new Types.ObjectId(tenantId),
       name: finalDto.name,
       sku: finalDto.sku,
       batchQty: finalDto.batchQty,
@@ -119,7 +128,7 @@ export class ProductionService {
 
   async findAll(tenantId: string, page: number, limit: number, search?: string, status?: string) {
     const skip = skipFromPage(page, limit);
-    const q: Record<string, unknown> = { tenantId };
+    const q: Record<string, unknown> = { tenantId: this.tidFilter(tenantId) };
     if (status) q.status = status;
     if (search) {
       q.$or = [
@@ -137,7 +146,7 @@ export class ProductionService {
 
   /** Retorna todos os lotes agrupados por status (para o Kanban) */
   async findKanban(tenantId: string) {
-    const all = await this.model.find({ tenantId }).sort({ createdAt: -1 }).lean().exec();
+    const all = await this.model.find({ tenantId: this.tidFilter(tenantId) }).sort({ createdAt: -1 }).lean().exec();
     const grouped: Record<string, typeof all> = {};
     for (const batch of all) {
       const s = batch.status ?? 'Planejado';
@@ -149,18 +158,18 @@ export class ProductionService {
 
   /** Lista todos os status distintos existentes */
   async getDistinctStatuses(tenantId: string): Promise<string[]> {
-    const statuses = await this.model.distinct('status', { tenantId }).exec() as string[];
+    const statuses = await this.model.distinct('status', { tenantId: this.tidFilter(tenantId) }).exec() as string[];
     return statuses.sort();
   }
 
   async findOne(tenantId: string, id: string) {
-    const doc = await this.model.findOne({ _id: id, tenantId }).lean().exec();
+    const doc = await this.model.findOne({ _id: id, tenantId: this.tidFilter(tenantId) }).lean().exec();
     if (!doc) throw new NotFoundException('Lote de produção não encontrado');
     return doc;
   }
 
   async update(tenantId: string, id: string, dto: UpdateProductionBatchDto) {
-    const existing = await this.model.findOne({ _id: id, tenantId }).lean().exec();
+    const existing = await this.model.findOne({ _id: id, tenantId: this.tidFilter(tenantId) }).lean().exec();
     if (!existing) throw new NotFoundException('Lote de produção não encontrado');
 
     // Merge para recalcular custos com dados atualizados
@@ -198,7 +207,7 @@ export class ProductionService {
     }
 
     const doc = await this.model
-      .findOneAndUpdate({ _id: id, tenantId }, { $set: payload }, { new: true })
+      .findOneAndUpdate({ _id: id, tenantId: this.tidFilter(tenantId) }, { $set: payload }, { new: true })
       .lean()
       .exec();
     if (!doc) throw new NotFoundException();
@@ -210,13 +219,13 @@ export class ProductionService {
   }
 
   async remove(tenantId: string, id: string) {
-    const existing = await this.model.findOne({ _id: id, tenantId }).lean().exec();
+    const existing = await this.model.findOne({ _id: id, tenantId: this.tidFilter(tenantId) }).lean().exec();
     if (!existing) throw new NotFoundException('Lote de produção não encontrado');
 
     if (existing.status === 'Concluído' || existing.status === 'Pronto') {
       await this.adjustStock(existing as any, -1);
     }
-    const res = await this.model.deleteOne({ _id: id, tenantId }).exec();
+    const res = await this.model.deleteOne({ _id: id, tenantId: this.tidFilter(tenantId) }).exec();
     if (!res.deletedCount) throw new NotFoundException();
     return { deleted: true };
   }
@@ -232,7 +241,7 @@ export class ProductionService {
         totalUnits: number;
         batchCount: number;
       }>([
-        { $match: { createdAt: { $gte: from, $lte: to } } },
+        { $match: { tenantId: this.tidFilter(tenantId), createdAt: { $gte: from, $lte: to } } },
         {
           $group: {
             _id: null,
