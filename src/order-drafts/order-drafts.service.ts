@@ -14,6 +14,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { OrdersService } from '../orders/orders.service';
 import { PaymentsService } from '../payments/payments.service';
 import { CustomersService } from '../customers/customers.service';
+import { ProductsService } from '../products/products.service';
 import { ProductVariant } from '../products/schemas/product-variant.schema';
 import {
   ORDER_DRAFT_EXPORT_COLUMNS,
@@ -35,6 +36,7 @@ export class OrderDraftsService {
     private readonly orders: OrdersService,
     private readonly payments: PaymentsService,
     private readonly customers: CustomersService,
+    private readonly products: ProductsService,
     private readonly notify: NotificationsService,
     private readonly config: ConfigService,
     private readonly excel: ExcelSpreadsheetService,
@@ -80,6 +82,7 @@ export class OrderDraftsService {
   private async rebuildLinesFromDto(
     tenantId: string,
     lines: NonNullable<PublicPatchDraftDto['lines']>,
+    enforceStock: boolean,
   ): Promise<OrderDraft['lines']> {
     if (!lines?.length) return [];
     const built: OrderDraft['lines'] = [];
@@ -91,10 +94,27 @@ export class OrderDraftsService {
         .findOne({ _id: line.variantId, tenantId: new Types.ObjectId(tenantId) })
         .exec();
       if (!v) throw new BadRequestException('Variant not found');
+      // Public checkout has no backorder/encomenda concept (unlike the PDV cart), so
+      // block it from ever exceeding on-hand stock; staff drafts keep the permissive path.
+      if (enforceStock) {
+        const available = v.quantityOnHand ?? 0;
+        if (line.quantity > available) {
+          throw new BadRequestException(
+            `Estoque insuficiente para ${v.sku}: disponível ${available}, solicitado ${line.quantity}`,
+          );
+        }
+      }
+      // Price is always computed server-side from quantity + the product's own
+      // wholesale rule — never trust a client-sent unit price (price manipulation risk).
+      const pricing = await this.products.getWholesalePricing(tenantId, String(v._id));
+      const unitPrice =
+        pricing && line.quantity >= pricing.minWholesaleQty
+          ? pricing.priceWholesale
+          : (pricing?.priceRetail ?? v.price ?? 0);
       built.push({
         variantId: v._id as Types.ObjectId,
         quantity: line.quantity,
-        unitPrice: v.price ?? 0,
+        unitPrice,
       });
     }
     return built;
@@ -105,10 +125,11 @@ export class OrderDraftsService {
     doc: OrderDraftDocument,
     dto: StaffPatchOrderDraftDto,
     allowWhenLocked: boolean,
+    enforceStock: boolean,
   ): Promise<void> {
     this.assertDraftPatchable(doc, allowWhenLocked);
     if (dto.lines) {
-      doc.lines = await this.rebuildLinesFromDto(tenantId, dto.lines);
+      doc.lines = await this.rebuildLinesFromDto(tenantId, dto.lines, enforceStock);
     }
     if (dto.status !== undefined) doc.status = dto.status;
     if (dto.paymentMethodChoice !== undefined) {
@@ -141,7 +162,7 @@ export class OrderDraftsService {
       .findOne({ sessionToken: t, tenantId: new Types.ObjectId(tenantId) })
       .exec();
     if (!doc) throw new NotFoundException();
-    await this.applyDraftPatch(tenantId, doc, dto as StaffPatchOrderDraftDto, false);
+    await this.applyDraftPatch(tenantId, doc, dto as StaffPatchOrderDraftDto, false, true);
     await doc.save();
     return doc.toObject();
   }
@@ -152,7 +173,7 @@ export class OrderDraftsService {
       .findOne({ sessionToken: t, tenantId: new Types.ObjectId(tenantId) })
       .exec();
     if (!doc) throw new NotFoundException();
-    await this.applyDraftPatch(tenantId, doc, dto, true);
+    await this.applyDraftPatch(tenantId, doc, dto, true, false);
     await doc.save();
     return doc.toObject();
   }
@@ -174,17 +195,25 @@ export class OrderDraftsService {
     if (!doc) throw new NotFoundException();
     if (!doc.lines.length) throw new BadRequestException('No lines on draft');
     let customerId = doc.customerId ?? body?.customerId;
-    
-    // Auto-create customer if missing but metadata has customer info
+
+    // Resolve guest customer from metadata: reuse an existing customer matched by
+    // WhatsApp/phone id instead of creating a duplicate record on every repeat purchase.
     if (!customerId && doc.metadata && typeof doc.metadata === 'object' && 'customer' in doc.metadata) {
       const custData = (doc.metadata as any).customer;
       if (custData && custData.name) {
-        const newCustomer = await this.customers.create(tenantId, {
-          name: String(custData.name).trim(),
-          phone: custData.phone ? String(custData.phone).trim() : undefined,
-          email: custData.email ? String(custData.email).trim() : undefined,
-        });
-        customerId = newCustomer._id;
+        const waId = doc.waId?.trim();
+        const existing = waId ? await this.customers.findByWaId(tenantId, waId) : null;
+        if (existing) {
+          customerId = existing._id;
+        } else {
+          const newCustomer = await this.customers.create(tenantId, {
+            name: String(custData.name).trim(),
+            phone: custData.phone ? String(custData.phone).trim() : undefined,
+            email: custData.email ? String(custData.email).trim() : undefined,
+            whatsappWaId: waId || undefined,
+          });
+          customerId = newCustomer._id;
+        }
         doc.customerId = customerId as Types.ObjectId;
       }
     }

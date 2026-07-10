@@ -27,6 +27,7 @@ import {
   PRODUCT_EXPORT_COLUMNS,
   productImportHeaderAliases,
 } from './product-excel.constants';
+import { LocationsService } from '../locations/locations.service';
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -53,6 +54,7 @@ export class ProductsService {
     private readonly ledgerModel: Model<StockLedger>,
     private readonly excel: ExcelSpreadsheetService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly locations: LocationsService,
   ) {}
 
   private resolveVariantRetail(it: ProductVariantUpsertDto): number {
@@ -107,6 +109,47 @@ export class ProductsService {
     o.minWholesaleQty = minW;
 
     return o;
+  }
+
+  /**
+   * Effective retail/wholesale pricing for a variant, applying the same
+   * variant-overrides-product fallback used to display pricing in the catalog.
+   * Used to price public checkout lines server-side (never trust a client-sent unit price).
+   */
+  async getWholesalePricing(
+    tenantId: string,
+    variantId: string,
+  ): Promise<{ priceRetail: number; priceWholesale: number; minWholesaleQty: number } | null> {
+    const v = await this.variantModel
+      .findOne({ _id: variantId, tenantId: new Types.ObjectId(tenantId) })
+      .lean()
+      .exec();
+    if (!v) return null;
+    const product = await this.productModel
+      .findOne({ _id: v.productId, tenantId: new Types.ObjectId(tenantId) })
+      .lean()
+      .exec();
+
+    const priceRetail = Number(v.price ?? 0);
+    const vWholesale = v.priceWholesale;
+    const pWholesale = product?.priceWholesale;
+    const priceWholesale =
+      vWholesale !== undefined && vWholesale !== null
+        ? Number(vWholesale)
+        : pWholesale !== undefined && pWholesale !== null
+          ? Number(pWholesale)
+          : priceRetail;
+
+    const minV = v.minWholesaleQty;
+    const minP = product?.minWholesaleQty;
+    const minWholesaleQty =
+      typeof minV === 'number' && !Number.isNaN(minV)
+        ? minV
+        : typeof minP === 'number' && !Number.isNaN(minP)
+          ? minP
+          : 6;
+
+    return { priceRetail, priceWholesale, minWholesaleQty };
   }
 
   private enrichProductPricing(
@@ -861,6 +904,7 @@ export class ProductsService {
         reason: 'initial',
         note: 'Initial on-hand at variant creation',
       });
+      await this.locations.adjust(tenantId, doc._id as Types.ObjectId, qty);
     }
     return doc;
   }
@@ -931,6 +975,7 @@ export class ProductsService {
     });
     v.quantityOnHand = next;
     await v.save();
+    await this.locations.adjust(String(v.tenantId), v._id as Types.ObjectId, dto.delta);
 
     // Notify integrations of stock change
     this.eventEmitter.emit('stock.changed', {
@@ -1191,6 +1236,10 @@ export class ProductsService {
           }
           if (Object.keys(patch).length) {
             await this.variantModel.updateOne({ _id: v._id, tenantId: new Types.ObjectId(tenantId) }, { $set: patch }).exec();
+            if (typeof patch.quantityOnHand === 'number') {
+              const stockDelta = patch.quantityOnHand - (v.quantityOnHand ?? 0);
+              await this.locations.adjust(tenantId, v._id as Types.ObjectId, stockDelta);
+            }
           }
         }
         updated.push(id);

@@ -9,6 +9,7 @@ import { StockLedger, StockLedgerSchema } from './schemas/stock-ledger.schema';
 import { ProductsController } from './products.controller';
 import { ProductsService } from './products.service';
 import { VariantsController } from './variants.controller';
+import { LocationsModule } from '../locations/locations.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { VariantsController } from './variants.controller';
       { name: ProductVariant.name, schema: ProductVariantSchema },
       { name: StockLedger.name, schema: StockLedgerSchema },
     ]),
+    LocationsModule,
   ],
   controllers: [ProductsController, VariantsController],
   providers: [ProductsService],
