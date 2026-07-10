@@ -45,6 +45,11 @@ export class ProductVariant {
   @Prop({ type: Number, default: 0 })
   reorderPoint: number;
 
+  /** Se true, permite vender além do saldo em estoque (produção sob encomenda).
+   * Só tem efeito para tenants com a feature `production` (planos pro/enterprise). */
+  @Prop({ type: Boolean, default: false })
+  acceptsBackorder: boolean;
+
   @Prop({ type: [ProductImageSchema], default: [] })
   images: ProductImage[];
 }

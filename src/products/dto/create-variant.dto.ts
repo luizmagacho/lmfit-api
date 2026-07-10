@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsNumber,
   IsOptional,
   IsString,
@@ -71,6 +72,14 @@ export class CreateVariantDto {
   @IsNumber()
   @Min(0)
   reorderPoint?: number;
+
+  @ApiPropertyOptional({
+    default: false,
+    description: 'Permite vender além do estoque (produção sob encomenda). Requer plano com a feature "production".',
+  })
+  @IsOptional()
+  @IsBoolean()
+  acceptsBackorder?: boolean;
 
   @ApiPropertyOptional({ type: [ProductImageDto] })
   @IsOptional()

@@ -83,6 +83,7 @@ export class OrderDraftsService {
     tenantId: string,
     lines: NonNullable<PublicPatchDraftDto['lines']>,
     enforceStock: boolean,
+    allowBackorder: boolean,
   ): Promise<OrderDraft['lines']> {
     if (!lines?.length) return [];
     const built: OrderDraft['lines'] = [];
@@ -94,14 +95,20 @@ export class OrderDraftsService {
         .findOne({ _id: line.variantId, tenantId: new Types.ObjectId(tenantId) })
         .exec();
       if (!v) throw new BadRequestException('Variant not found');
-      // Public checkout has no backorder/encomenda concept (unlike the PDV cart), so
-      // block it from ever exceeding on-hand stock; staff drafts keep the permissive path.
+      // Public checkout blocks selling past on-hand stock, unless the variant is
+      // explicitly marked as accepting backorder AND the tenant's plan allows it
+      // (feature "production" — encomenda is fulfilled via the production module).
+      let isOrder = false;
       if (enforceStock) {
         const available = v.quantityOnHand ?? 0;
         if (line.quantity > available) {
-          throw new BadRequestException(
-            `Estoque insuficiente para ${v.sku}: disponível ${available}, solicitado ${line.quantity}`,
-          );
+          if (allowBackorder && v.acceptsBackorder) {
+            isOrder = true;
+          } else {
+            throw new BadRequestException(
+              `Estoque insuficiente para ${v.sku}: disponível ${available}, solicitado ${line.quantity}`,
+            );
+          }
         }
       }
       // Price is always computed server-side from quantity + the product's own
@@ -115,6 +122,7 @@ export class OrderDraftsService {
         variantId: v._id as Types.ObjectId,
         quantity: line.quantity,
         unitPrice,
+        isOrder,
       });
     }
     return built;
@@ -126,10 +134,11 @@ export class OrderDraftsService {
     dto: StaffPatchOrderDraftDto,
     allowWhenLocked: boolean,
     enforceStock: boolean,
+    allowBackorder: boolean,
   ): Promise<void> {
     this.assertDraftPatchable(doc, allowWhenLocked);
     if (dto.lines) {
-      doc.lines = await this.rebuildLinesFromDto(tenantId, dto.lines, enforceStock);
+      doc.lines = await this.rebuildLinesFromDto(tenantId, dto.lines, enforceStock, allowBackorder);
     }
     if (dto.status !== undefined) doc.status = dto.status;
     if (dto.paymentMethodChoice !== undefined) {
@@ -156,13 +165,19 @@ export class OrderDraftsService {
     }
   }
 
-  async patchByToken(tenantId: string, token: string, dto: PublicPatchDraftDto) {
+  async patchByToken(
+    tenantId: string,
+    token: string,
+    dto: PublicPatchDraftDto,
+    tenantFeatures: string[] = [],
+  ) {
     const t = this.normalizeToken(token);
     const doc = await this.draftModel
       .findOne({ sessionToken: t, tenantId: new Types.ObjectId(tenantId) })
       .exec();
     if (!doc) throw new NotFoundException();
-    await this.applyDraftPatch(tenantId, doc, dto as StaffPatchOrderDraftDto, false, true);
+    const allowBackorder = tenantFeatures.includes('production');
+    await this.applyDraftPatch(tenantId, doc, dto as StaffPatchOrderDraftDto, false, true, allowBackorder);
     await doc.save();
     return doc.toObject();
   }
@@ -173,7 +188,7 @@ export class OrderDraftsService {
       .findOne({ sessionToken: t, tenantId: new Types.ObjectId(tenantId) })
       .exec();
     if (!doc) throw new NotFoundException();
-    await this.applyDraftPatch(tenantId, doc, dto, true, false);
+    await this.applyDraftPatch(tenantId, doc, dto, true, false, true);
     await doc.save();
     return doc.toObject();
   }
@@ -225,6 +240,7 @@ export class OrderDraftsService {
       variantId: String(l.variantId),
       quantity: l.quantity,
       unitPrice: l.unitPrice,
+      isOrder: l.isOrder ?? false,
     }));
     const notesParts: string[] = [];
     if (doc.paymentMethodChoice) {

@@ -340,6 +340,9 @@ export class ProductsService {
       if (it.minWholesaleQty !== undefined) {
         payload.minWholesaleQty = Math.floor(Number(it.minWholesaleQty));
       }
+      if (it.acceptsBackorder !== undefined) {
+        payload.acceptsBackorder = it.acceptsBackorder;
+      }
 
       if (it._id && Types.ObjectId.isValid(it._id)) {
         const oid = new Types.ObjectId(it._id);
@@ -894,6 +897,7 @@ export class ProductsService {
       barcode: dto.barcode,
       quantityOnHand: qty,
       reorderPoint: dto.reorderPoint ?? 0,
+      acceptsBackorder: dto.acceptsBackorder ?? false,
       images: dto.images ?? [],
     });
     if (qty !== 0) {

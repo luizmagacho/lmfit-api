@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsMongoId,
   IsNumber,
   IsOptional,
@@ -77,6 +78,14 @@ export class ProductVariantUpsertDto {
   @IsNumber()
   @Min(0)
   quantityOnHand?: number;
+
+  @ApiPropertyOptional({
+    default: false,
+    description: 'Permite vender além do estoque (produção sob encomenda). Requer plano com a feature "production".',
+  })
+  @IsOptional()
+  @IsBoolean()
+  acceptsBackorder?: boolean;
 
   @ApiPropertyOptional({ description: 'Número ou string BRL / só dígitos como centavos' })
   @IsOptional()

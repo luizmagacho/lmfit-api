@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { TenantId } from '../common/decorators/tenant-id.decorator';
+import { TenantFeatures } from '../common/decorators/tenant-features.decorator';
 import {
   PublicCreateDraftDto,
   PublicPatchDraftDto,
@@ -28,8 +29,9 @@ export class PublicOrderDraftsController {
     @TenantId() tenantId: string,
     @Param('token') token: string,
     @Body() dto: PublicPatchDraftDto,
+    @TenantFeatures() features: string[],
   ) {
-    return this.drafts.patchByToken(tenantId, token, dto);
+    return this.drafts.patchByToken(tenantId, token, dto, features);
   }
 
   @Post(':token/submit')
