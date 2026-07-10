@@ -103,4 +103,26 @@ export class FiscalService {
       .lean()
       .exec();
   }
+
+  /** Tenant-wide fiscal document history, most recent first. */
+  async findAll(tenantId: string, page: number, limit: number) {
+    const tid = new Types.ObjectId(tenantId);
+    const skip = (page - 1) * limit;
+    const [docs, total] = await Promise.all([
+      this.model.find({ tenantId: tid }).sort({ createdAt: -1 }).skip(skip).limit(limit).lean().exec(),
+      this.model.countDocuments({ tenantId: tid }),
+    ]);
+    const orderIds = docs.map((d) => d.orderId);
+    const orders = await this.orderModel
+      .find({ _id: { $in: orderIds } })
+      .select('number')
+      .lean()
+      .exec();
+    const orderNumberById = new Map(orders.map((o) => [String(o._id), o.number]));
+    const items = docs.map((d) => ({
+      ...d,
+      orderNumber: orderNumberById.get(String(d.orderId)) ?? null,
+    }));
+    return { items, total, page, limit };
+  }
 }

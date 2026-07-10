@@ -51,12 +51,13 @@ export class LocationsService {
     }
   }
 
-  findAll(tenantId: string) {
-    return this.model
+  async findAll(tenantId: string) {
+    const items = await this.model
       .find({ tenantId: new Types.ObjectId(tenantId) })
       .sort({ isDefault: -1, name: 1 })
       .lean()
       .exec();
+    return { items, total: items.length };
   }
 
   async findOne(tenantId: string, id: string) {

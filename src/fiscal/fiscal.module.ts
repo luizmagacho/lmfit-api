@@ -4,7 +4,7 @@ import { Order, OrderSchema } from '../orders/schemas/order.schema';
 import { ProductVariant, ProductVariantSchema } from '../products/schemas/product-variant.schema';
 import { TenantsModule } from '../tenants/tenants.module';
 import { NuvemFiscalAdapter } from './adapters/nuvem-fiscal.adapter';
-import { FiscalController } from './fiscal.controller';
+import { FiscalController, FiscalHistoryController } from './fiscal.controller';
 import { FiscalService } from './fiscal.service';
 import { FiscalDocument, FiscalDocumentSchema } from './schemas/fiscal-document.schema';
 
@@ -17,7 +17,7 @@ import { FiscalDocument, FiscalDocumentSchema } from './schemas/fiscal-document.
     ]),
     TenantsModule,
   ],
-  controllers: [FiscalController],
+  controllers: [FiscalController, FiscalHistoryController],
   providers: [FiscalService, NuvemFiscalAdapter],
   exports: [FiscalService],
 })
