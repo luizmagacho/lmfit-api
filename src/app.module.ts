@@ -16,6 +16,7 @@ import { ExcelModule } from './common/excel/excel.module';
 import { FiscalModule } from './fiscal/fiscal.module';
 import { CustomersModule } from './customers/customers.module';
 import { IntegrationsModule } from './integrations/integrations.module';
+import { LeadsModule } from './leads/leads.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { JwtRegisteredModule } from './jwt/jwt-registered.module';
 import { LocationsModule } from './locations/locations.module';
@@ -77,6 +78,7 @@ import { TenantMiddleware } from './common/middleware/tenant.middleware';
     BillingModule,
     TenantsModule,
     IntegrationsModule,
+    LeadsModule,
   ],
   controllers: [AppController],
   providers: [
