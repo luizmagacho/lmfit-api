@@ -81,6 +81,15 @@ export class CreateVariantDto {
   @IsBoolean()
   acceptsBackorder?: boolean;
 
+  @ApiPropertyOptional({
+    default: 1,
+    description: 'Quantidade mínima para aceitar encomenda (ex.: só produz a partir de 3 peças).',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  backorderMinQty?: number;
+
   @ApiPropertyOptional({ type: [ProductImageDto] })
   @IsOptional()
   @IsArray()

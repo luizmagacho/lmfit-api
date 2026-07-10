@@ -102,8 +102,13 @@ export class OrderDraftsService {
       if (enforceStock) {
         const available = v.quantityOnHand ?? 0;
         if (line.quantity > available) {
-          if (allowBackorder && v.acceptsBackorder) {
+          const minQty = v.backorderMinQty ?? 1;
+          if (allowBackorder && v.acceptsBackorder && line.quantity >= minQty) {
             isOrder = true;
+          } else if (allowBackorder && v.acceptsBackorder) {
+            throw new BadRequestException(
+              `Encomenda de ${v.sku} só a partir de ${minQty} unidade(s): solicitado ${line.quantity}`,
+            );
           } else {
             throw new BadRequestException(
               `Estoque insuficiente para ${v.sku}: disponível ${available}, solicitado ${line.quantity}`,

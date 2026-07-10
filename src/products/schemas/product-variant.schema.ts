@@ -50,6 +50,10 @@ export class ProductVariant {
   @Prop({ type: Boolean, default: false })
   acceptsBackorder: boolean;
 
+  /** Quantidade mínima para aceitar encomenda (ex.: só produz a partir de 3 peças). */
+  @Prop({ type: Number, default: 1 })
+  backorderMinQty: number;
+
   @Prop({ type: [ProductImageSchema], default: [] })
   images: ProductImage[];
 }

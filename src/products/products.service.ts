@@ -343,6 +343,9 @@ export class ProductsService {
       if (it.acceptsBackorder !== undefined) {
         payload.acceptsBackorder = it.acceptsBackorder;
       }
+      if (it.backorderMinQty !== undefined) {
+        payload.backorderMinQty = Math.max(1, Math.floor(Number(it.backorderMinQty)));
+      }
 
       if (it._id && Types.ObjectId.isValid(it._id)) {
         const oid = new Types.ObjectId(it._id);
@@ -898,6 +901,7 @@ export class ProductsService {
       quantityOnHand: qty,
       reorderPoint: dto.reorderPoint ?? 0,
       acceptsBackorder: dto.acceptsBackorder ?? false,
+      backorderMinQty: dto.backorderMinQty ?? 1,
       images: dto.images ?? [],
     });
     if (qty !== 0) {
