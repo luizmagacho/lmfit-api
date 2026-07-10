@@ -14,7 +14,6 @@ import { skipFromPage } from '../common/dto/pagination-query.dto';
 import { ProductsService } from '../products/products.service';
 import { ProductVariant } from '../products/schemas/product-variant.schema';
 import { PurchasesService } from '../purchases/purchases.service';
-import type { CreatePublicOrderDto } from './dto/create-public-order.dto';
 import type { CreateOrderDto } from './dto/create-order.dto';
 import type { OrderLineInputDto } from './dto/order-line-input.dto';
 import type { UpdateOrderDto } from './dto/update-order.dto';
@@ -235,6 +234,8 @@ export class OrdersService {
     } else if (!isStockAppliedStatus(status) && dto.total !== undefined) {
       total = dto.total;
     }
+    const shippingCost = dto.shippingCost ?? 0;
+    total += shippingCost;
 
     const warnings = await this.buildWarnings(tenantId, lines);
 
@@ -254,6 +255,8 @@ export class OrdersService {
       total,
       notes: dto.notes,
       lines,
+      shippingMethod: dto.shippingMethod,
+      shippingCost,
       createdBy: createdBy ? new Types.ObjectId(createdBy) : undefined,
       operatorUserId:
         dto.operatorUserId && Types.ObjectId.isValid(dto.operatorUserId)
@@ -282,12 +285,13 @@ export class OrdersService {
   private listFilter(tenantId: string, search?: string, channel?: string) {
     const parts: Record<string, unknown>[] = [{ tenantId: new Types.ObjectId(tenantId) }];
     if (search) {
-      parts.push({
-        $or: [
-          { reference: new RegExp(search, 'i') },
-          { notes: new RegExp(search, 'i') },
-        ],
-      });
+      const or: Record<string, unknown>[] = [
+        { reference: new RegExp(search, 'i') },
+        { notes: new RegExp(search, 'i') },
+      ];
+      const asNumber = Number(search);
+      if (Number.isInteger(asNumber)) or.push({ number: asNumber });
+      parts.push({ $or: or });
     }
     if (channel && (ORDER_CHANNELS as readonly string[]).includes(channel)) {
       parts.push({ channel });
@@ -628,48 +632,6 @@ export class OrdersService {
 
     const lean = existing.toObject();
     return this.toResponse(lean as unknown as Record<string, unknown>, warnings);
-  }
-
-  async createFromPublic(tenantId: string, dto: CreatePublicOrderDto): Promise<Record<string, unknown>> {
-    if (dto.payment?.method === 'pix') {
-      const res = await this.create(
-        tenantId,
-        {
-          customerId: dto.customerId,
-          channel: dto.channel ?? 'online',
-          status: 'open',
-          lines: dto.lines,
-          reference: dto.reference,
-          notes: dto.notes,
-        },
-        undefined,
-      );
-      const total = Number(res.total ?? 0);
-      const pay = await this.payments.createPixPayment(tenantId, String(res._id), total);
-      return {
-        orderId: String(res._id),
-        warnings: res.warnings,
-        payment: {
-          paymentId: String(pay._id),
-          qrCode: pay.qrCode,
-          qrCodeImage: pay.qrCodeImage,
-          expiresAt: (pay.expiresAt as Date).toISOString(),
-        },
-      };
-    }
-    const res = await this.create(
-      tenantId,
-      {
-        customerId: dto.customerId,
-        channel: dto.channel ?? 'online',
-        status: 'open',
-        lines: dto.lines,
-        reference: dto.reference,
-        notes: dto.notes,
-      },
-      undefined,
-    );
-    return { orderId: String(res._id), warnings: res.warnings };
   }
 
   async remove(tenantId: string, id: string) {

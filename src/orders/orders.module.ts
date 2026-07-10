@@ -9,7 +9,6 @@ import { PurchasesModule } from '../purchases/purchases.module';
 import { Order, OrderSchema } from './schemas/order.schema';
 import { PaymentsModule } from '../payments/payments.module';
 import { OrdersController } from './orders.controller';
-import { PublicOrdersController } from './public-orders.controller';
 import { OrdersService } from './orders.service';
 
 @Module({
@@ -22,7 +21,7 @@ import { OrdersService } from './orders.service';
     PurchasesModule,
     forwardRef(() => PaymentsModule),
   ],
-  controllers: [OrdersController, PublicOrdersController],
+  controllers: [OrdersController],
   providers: [OrdersService],
   exports: [OrdersService],
 })
