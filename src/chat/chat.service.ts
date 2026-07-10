@@ -11,6 +11,7 @@ Responda SEMPRE com um JSON válido (sem markdown, sem texto fora do JSON) neste
 {"reply": "texto da resposta em português", "actions": []}
 "actions" é uma LISTA — inclua um item nela para cada coisa que o cliente pedir na mesma mensagem (pode ter 0, 1 ou vários). Cada item segue UM destes formatos:
 {"type": "add_to_cart", "variantId": "ID exato do catálogo", "quantity": número inteiro}
+{"type": "remove_from_cart", "variantId": "ID exato do carrinho atual do cliente", "quantity": número inteiro ou null}
 {"type": "lead_request", "productDescription": "descrição do que o cliente pediu", "customerName": "nome informado", "customerPhone": "telefone informado"}
 
 Regras para "reply":
@@ -28,6 +29,12 @@ Regras para "actions" do tipo "add_to_cart":
 - Se o cliente não disse a quantidade de um item, use 1.
 - Pode incluir um item "esgotado, aceita encomenda a partir de N unidade(s)" — o sistema trata como encomenda automaticamente, MAS só se a quantidade pedida for ≥ N. Se o cliente pedir menos que o mínimo, não inclua a ação — explique em "reply" que esse item só pode ser encomendado a partir de N unidades e pergunte se ele quer ajustar a quantidade.
 - Nunca inclua um item só "esgotado" (sem aceitar encomenda) como "add_to_cart".
+
+Regras para "actions" do tipo "remove_from_cart":
+- Use quando o cliente pedir para tirar/remover/cancelar/desistir de um item que já está no carrinho (veja "Carrinho atual do cliente" abaixo).
+- Use o variantId exatamente como aparece em "Carrinho atual do cliente" — nunca invente um ID que não esteja lá.
+- Se o cliente não disser a quantidade, use "quantity": null (remove o item inteiro). Se disser uma quantidade (ex.: "tira 1 camisa"), use esse número.
+- Se o carrinho estiver vazio ou o item não estiver nele, explique isso em "reply" e não inclua a ação.
 
 Regras para pedidos de produtos que a loja NÃO vende (fora do catálogo abaixo por completo):
 - Se o produto pedido é do MESMO tipo/contexto do que a loja vende (ex.: a loja vende camisas de clubes de futebol e o cliente pede camisa de seleção nacional, ou pede outro time/modelo que não está listado), NÃO diga apenas "não temos". Explique que esse item específico não está no catálogo agora, e pergunte o nome e telefone do cliente para a loja avaliar e providenciar.
@@ -87,7 +94,15 @@ export type ChatLeadAction = {
   customerPhone: string;
 };
 
-export type ChatAction = ChatCartAction | ChatLeadAction;
+export type ChatRemoveAction = {
+  type: 'remove_from_cart';
+  variantId: string;
+  isOrder: boolean;
+  /** null = remove the line entirely; number = decrease by that amount. */
+  quantity: number | null;
+};
+
+export type ChatAction = ChatCartAction | ChatLeadAction | ChatRemoveAction;
 
 @Injectable()
 export class ChatService {
@@ -195,9 +210,37 @@ export class ChatService {
     return { type: 'lead_request', productDescription, customerName, customerPhone };
   }
 
+  /** Renders what the client says is currently in their cart, so the model can
+   * reference it by variantId when asked to remove something. */
+  private buildCartContext(cartLines: Array<Record<string, unknown>>): string {
+    if (!cartLines.length) return '(carrinho vazio)';
+    return cartLines
+      .map((l) => {
+        const isOrder = l.isOrder === true;
+        return `  • variantId=${String(l.variantId)} | ${String(l.productName ?? '')} | ${Number(l.quantity ?? 0)} un${isOrder ? ' (encomenda)' : ''}`;
+      })
+      .join('\n');
+  }
+
+  /** Removing from the cart only affects the client's own local cart state — no pricing/stock
+   * trust issue — so we only need to confirm the variantId is one the client actually reported. */
+  private validateRemoveAction(
+    raw: Record<string, unknown>,
+    cartLines: Array<Record<string, unknown>>,
+  ): ChatRemoveAction | null {
+    if (typeof raw.variantId !== 'string') return null;
+    const line = cartLines.find((l) => String(l.variantId) === raw.variantId);
+    if (!line) return null;
+    const rawQty = raw.quantity;
+    const quantity =
+      rawQty === null || rawQty === undefined ? null : Math.max(1, Math.floor(Number(rawQty) || 0)) || null;
+    return { type: 'remove_from_cart', variantId: String(line.variantId), isOrder: line.isOrder === true, quantity };
+  }
+
   private async resolveActions(
     raw: Record<string, unknown>[],
     items: Array<Record<string, unknown>>,
+    cartLines: Array<Record<string, unknown>>,
     allowBackorder: boolean,
     tenantId: string,
   ): Promise<ChatAction[]> {
@@ -205,6 +248,9 @@ export class ChatService {
     for (const r of raw) {
       if (r.type === 'add_to_cart') {
         const action = this.validateCartAction(r, items, allowBackorder);
+        if (action) resolved.push(action);
+      } else if (r.type === 'remove_from_cart') {
+        const action = this.validateRemoveAction(r, cartLines);
         if (action) resolved.push(action);
       } else if (r.type === 'lead_request') {
         const action = this.validateLeadAction(r);
@@ -229,15 +275,17 @@ export class ChatService {
     const allowBackorder = tenantFeatures.includes('production');
     const { items } = await this.catalog.listProducts(tenantId);
     const relevant = this.selectRelevantProducts(items, dto.message);
-    const context = this.buildCatalogContext(relevant, allowBackorder);
+    const catalogContext = this.buildCatalogContext(relevant, allowBackorder);
+    const cartLines = (dto.cartLines ?? []) as unknown as Array<Record<string, unknown>>;
+    const cartContext = this.buildCartContext(cartLines);
 
-    const systemPrompt = `${SYSTEM_PROMPT}\n\nCatálogo disponível:\n${context}`;
+    const systemPrompt = `${SYSTEM_PROMPT}\n\nCatálogo disponível:\n${catalogContext}\n\nCarrinho atual do cliente:\n${cartContext}`;
     const history = (dto.history ?? []).map((h) => ({ role: h.role, content: h.content }));
 
     const { reply, actions } = await this.llm.chatReplyWithAction(systemPrompt, [
       ...history,
       { role: 'user', content: dto.message },
     ]);
-    return { reply, actions: await this.resolveActions(actions, items, allowBackorder, tenantId) };
+    return { reply, actions: await this.resolveActions(actions, items, cartLines, allowBackorder, tenantId) };
   }
 }
