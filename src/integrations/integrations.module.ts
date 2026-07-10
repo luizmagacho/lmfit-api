@@ -14,6 +14,8 @@ import { NuvemshopAdapter } from './adapters/nuvemshop.adapter';
 import { TrayAdapter } from './adapters/tray.adapter';
 import { LojaIntegradaAdapter } from './adapters/loja-integrada.adapter';
 import { ShopifyAdapter } from './adapters/shopify.adapter';
+import { MercadoLivreAdapter } from './adapters/mercadolivre.adapter';
+import { ShopeeAdapter } from './adapters/shopee.adapter';
 import { SyncCronService } from './sync-cron.service';
 
 @Module({
@@ -32,6 +34,8 @@ import { SyncCronService } from './sync-cron.service';
     TrayAdapter,
     LojaIntegradaAdapter,
     ShopifyAdapter,
+    MercadoLivreAdapter,
+    ShopeeAdapter,
     IntegrationsService,
     ProductMappingService,
     SyncEngineService,

@@ -1,0 +1,24 @@
+import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import { Order, OrderSchema } from '../orders/schemas/order.schema';
+import { ProductVariant, ProductVariantSchema } from '../products/schemas/product-variant.schema';
+import { TenantsModule } from '../tenants/tenants.module';
+import { NuvemFiscalAdapter } from './adapters/nuvem-fiscal.adapter';
+import { FiscalController } from './fiscal.controller';
+import { FiscalService } from './fiscal.service';
+import { FiscalDocument, FiscalDocumentSchema } from './schemas/fiscal-document.schema';
+
+@Module({
+  imports: [
+    MongooseModule.forFeature([
+      { name: FiscalDocument.name, schema: FiscalDocumentSchema },
+      { name: Order.name, schema: OrderSchema },
+      { name: ProductVariant.name, schema: ProductVariantSchema },
+    ]),
+    TenantsModule,
+  ],
+  controllers: [FiscalController],
+  providers: [FiscalService, NuvemFiscalAdapter],
+  exports: [FiscalService],
+})
+export class FiscalModule {}

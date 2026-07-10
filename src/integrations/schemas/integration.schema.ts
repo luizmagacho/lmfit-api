@@ -3,7 +3,14 @@ import { HydratedDocument, Types } from 'mongoose';
 
 export type IntegrationDocument = HydratedDocument<Integration>;
 
-export type IntegrationPlatform = 'bagy' | 'nuvemshop' | 'tray' | 'loja_integrada' | 'shopify';
+export type IntegrationPlatform =
+  | 'bagy'
+  | 'nuvemshop'
+  | 'tray'
+  | 'loja_integrada'
+  | 'shopify'
+  | 'mercadolivre'
+  | 'shopee';
 export type SyncStatus = 'success' | 'partial' | 'error';
 
 @Schema({ _id: false })
@@ -20,7 +27,11 @@ export class Integration {
   @Prop({ type: Types.ObjectId, ref: 'Tenant', required: true, index: true })
   tenantId: Types.ObjectId;
 
-  @Prop({ type: String, required: true, enum: ['bagy', 'nuvemshop', 'tray', 'loja_integrada', 'shopify'] })
+  @Prop({
+    type: String,
+    required: true,
+    enum: ['bagy', 'nuvemshop', 'tray', 'loja_integrada', 'shopify', 'mercadolivre', 'shopee'],
+  })
   platform: IntegrationPlatform;
 
   @Prop({ required: true, trim: true })

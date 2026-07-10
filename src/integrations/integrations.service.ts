@@ -9,6 +9,8 @@ import { NuvemshopAdapter } from './adapters/nuvemshop.adapter';
 import { TrayAdapter } from './adapters/tray.adapter';
 import { LojaIntegradaAdapter } from './adapters/loja-integrada.adapter';
 import { ShopifyAdapter } from './adapters/shopify.adapter';
+import { MercadoLivreAdapter } from './adapters/mercadolivre.adapter';
+import { ShopeeAdapter } from './adapters/shopee.adapter';
 import { PlatformAdapter } from './adapters/platform-adapter.interface';
 
 @Injectable()
@@ -23,12 +25,16 @@ export class IntegrationsService {
     private readonly trayAdapter: TrayAdapter,
     private readonly lojaIntegradaAdapter: LojaIntegradaAdapter,
     private readonly shopifyAdapter: ShopifyAdapter,
+    private readonly mercadoLivreAdapter: MercadoLivreAdapter,
+    private readonly shopeeAdapter: ShopeeAdapter,
   ) {
     this.adapters.set('bagy', this.bagyAdapter);
     this.adapters.set('nuvemshop', this.nuvemshopAdapter);
     this.adapters.set('tray', this.trayAdapter);
     this.adapters.set('loja_integrada', this.lojaIntegradaAdapter);
     this.adapters.set('shopify', this.shopifyAdapter);
+    this.adapters.set('mercadolivre', this.mercadoLivreAdapter);
+    this.adapters.set('shopee', this.shopeeAdapter);
   }
 
   getAdapter(platform: string): PlatformAdapter {

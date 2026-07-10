@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { skipFromPage } from '../common/dto/pagination-query.dto';
 import type { CreateTenantDto } from './dto/create-tenant.dto';
 import type { UpdateBrandingDto } from './dto/update-branding.dto';
+import type { UpdateFiscalConfigDto } from './dto/update-fiscal-config.dto';
 import type { UpdateTenantDto } from './dto/update-tenant.dto';
 import { Tenant, type TenantDocument, type TenantPlan } from './schemas/tenant.schema';
 import { TenantRequest, type TenantRequestDocument } from './schemas/tenant-request.schema';
@@ -163,6 +164,26 @@ export class TenantsService {
 
     // invalidate cache
     this.slugCache.delete(doc.slug);
+    return doc;
+  }
+
+  /* ----- update fiscal config only ----- */
+
+  async updateFiscalConfig(id: string, dto: UpdateFiscalConfigDto): Promise<TenantDocument> {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
+
+    const setFields: Record<string, unknown> = {};
+    if (dto.cnpj !== undefined) setFields['fiscal.cnpj'] = dto.cnpj;
+    if (dto.inscricaoEstadual !== undefined) setFields['fiscal.inscricaoEstadual'] = dto.inscricaoEstadual;
+    if (dto.regimeTributario !== undefined) setFields['fiscal.regimeTributario'] = dto.regimeTributario;
+    if (dto.ambiente !== undefined) setFields['fiscal.ambiente'] = dto.ambiente;
+    if (dto.nuvemFiscalClientId !== undefined) setFields['fiscal.nuvemFiscalClientId'] = dto.nuvemFiscalClientId;
+    if (dto.nuvemFiscalClientSecret !== undefined) setFields['fiscal.nuvemFiscalClientSecret'] = dto.nuvemFiscalClientSecret;
+
+    const doc = await this.tenantModel
+      .findByIdAndUpdate(id, { $set: setFields }, { new: true })
+      .exec();
+    if (!doc) throw new NotFoundException();
     return doc;
   }
 

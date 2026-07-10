@@ -31,6 +31,21 @@ export class TenantLimits {
   @Prop({ default: 1 }) maxUsers: number;
 }
 
+export type FiscalRegime = 'simples_nacional' | 'lucro_presumido' | 'lucro_real';
+export type FiscalAmbiente = 'homologacao' | 'producao';
+
+/** Fiscal identity + Nuvem Fiscal credentials used to emit NF-e/NFC-e for this tenant. */
+export class FiscalConfig {
+  @Prop({ trim: true }) cnpj?: string;
+  @Prop({ trim: true }) inscricaoEstadual?: string;
+  @Prop({ type: String, enum: ['simples_nacional', 'lucro_presumido', 'lucro_real'] })
+  regimeTributario?: FiscalRegime;
+  @Prop({ type: String, enum: ['homologacao', 'producao'], default: 'homologacao' })
+  ambiente: FiscalAmbiente;
+  @Prop({ trim: true }) nuvemFiscalClientId?: string;
+  @Prop({ trim: true }) nuvemFiscalClientSecret?: string;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main schema                                                       */
 /* ------------------------------------------------------------------ */
@@ -62,6 +77,9 @@ export class Tenant {
 
   @Prop({ type: TenantLimits, default: () => ({}) })
   limits: TenantLimits;
+
+  @Prop({ type: FiscalConfig, default: () => ({}) })
+  fiscal: FiscalConfig;
 
   @Prop({ trim: true })
   geminiApiKey?: string;

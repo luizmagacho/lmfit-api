@@ -11,7 +11,7 @@ export class IntegrationCredentialsDto {
 }
 
 export class CreateIntegrationDto {
-  @IsEnum(['bagy', 'nuvemshop', 'tray', 'loja_integrada', 'shopify'])
+  @IsEnum(['bagy', 'nuvemshop', 'tray', 'loja_integrada', 'shopify', 'mercadolivre', 'shopee'])
   platform: IntegrationPlatform;
 
   @IsString()

@@ -11,11 +11,14 @@ import { AlertsModule } from './alerts/alerts.module';
 import { AppController } from './app.controller';
 import { AuthModule } from './auth/auth.module';
 import { CatalogModule } from './catalog/catalog.module';
+import { ChatModule } from './chat/chat.module';
 import { ExcelModule } from './common/excel/excel.module';
+import { FiscalModule } from './fiscal/fiscal.module';
 import { CustomersModule } from './customers/customers.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { JwtRegisteredModule } from './jwt/jwt-registered.module';
+import { LocationsModule } from './locations/locations.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { OrderDraftsModule } from './order-drafts/order-drafts.module';
 import { OrdersModule } from './orders/orders.module';
@@ -60,9 +63,12 @@ import { TenantMiddleware } from './common/middleware/tenant.middleware';
     PurchasesModule,
     InvoicesModule,
     ProductsModule,
+    LocationsModule,
     AlertsModule,
     ReportsModule,
+    FiscalModule,
     CatalogModule,
+    ChatModule,
     OrderDraftsModule,
     WhatsappModule,
     CashflowModule,
