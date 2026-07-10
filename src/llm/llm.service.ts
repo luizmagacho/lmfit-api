@@ -117,23 +117,32 @@ export class LlmService {
     );
   }
 
-  /** Free-text conversational reply (no JSON mode) for the public storefront chatbot. */
-  async chatReply(
+  /**
+   * Storefront chatbot reply. Asks the model for structured JSON (reply text +
+   * an optional cart action) so the widget can act on it — the caller must still
+   * validate `action` against real catalog data before trusting it.
+   */
+  async chatReplyWithAction(
     systemPrompt: string,
     history: Array<{ role: 'user' | 'assistant'; content: string }>,
-  ): Promise<string> {
+  ): Promise<{ reply: string; action: Record<string, unknown> | null }> {
     const { apiKey } = this.getSettings();
     if (!apiKey) {
-      return 'Desculpe, o assistente virtual está indisponível no momento.';
+      return { reply: 'Desculpe, o assistente virtual está indisponível no momento.', action: null };
     }
     try {
-      return await this.chatCompletion(
+      const out = await this.chatCompletion(
         [{ role: 'system', content: systemPrompt }, ...history],
-        { maxTokens: 1024, jsonMode: false },
+        { maxTokens: 1024, jsonMode: true },
       );
+      const parsed = JSON.parse(extractJson(out)) as { reply?: string; action?: Record<string, unknown> | null };
+      return {
+        reply: typeof parsed.reply === 'string' && parsed.reply.trim() ? parsed.reply : 'Como posso ajudar?',
+        action: parsed.action ?? null,
+      };
     } catch (e) {
-      this.log.error('chatReply failed', e as Error);
-      return 'Desculpe, não consegui responder agora. Tente novamente em instantes.';
+      this.log.error('chatReplyWithAction failed', e as Error);
+      return { reply: 'Desculpe, não consegui responder agora. Tente novamente em instantes.', action: null };
     }
   }
 
