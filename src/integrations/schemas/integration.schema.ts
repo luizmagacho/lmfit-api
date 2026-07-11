@@ -10,7 +10,8 @@ export type IntegrationPlatform =
   | 'loja_integrada'
   | 'shopify'
   | 'mercadolivre'
-  | 'shopee';
+  | 'shopee'
+  | 'tiktok';
 export type SyncStatus = 'success' | 'partial' | 'error';
 
 @Schema({ _id: false })
@@ -20,6 +21,10 @@ export class IntegrationCredentials {
   @Prop() applicationKey?: string;
   @Prop() storeId?: string;
   @Prop() storeDomain?: string;
+  /** TikTok Shop: refresh_token do OAuth (access_token expira em ~90 dias). */
+  @Prop() refreshToken?: string;
+  /** TikTok Shop: shop_cipher retornado junto com o access_token na autorização — obrigatório em toda chamada da Shop API. */
+  @Prop() shopCipher?: string;
 }
 
 @Schema({ timestamps: true, collection: 'integrations' })
@@ -54,6 +59,10 @@ export class Integration {
 
   @Prop({ type: Date })
   lastSyncAt?: Date;
+
+  /** Marca até onde a importação de pedidos já avançou (pull incremental). */
+  @Prop({ type: Date })
+  lastOrderSyncAt?: Date;
 
   @Prop({ type: String, enum: ['success', 'partial', 'error'] })
   lastSyncStatus?: SyncStatus;

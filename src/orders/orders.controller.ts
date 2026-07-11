@@ -21,6 +21,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { ImportJsonDto } from '../common/dto/import-json.dto';
+import { Audited } from '../audit/audited.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { TenantId } from '../common/decorators/tenant-id.decorator';
 import type { JwtUserPayload } from '../auth/jwt-user.payload';
@@ -38,6 +39,7 @@ export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
   @Post()
+  @Audited('orders.create')
   create(
     @TenantId() tenantId: string,
     @Body() dto: CreateOrderDto,
@@ -113,6 +115,7 @@ export class OrdersController {
   }
 
   @Patch(':id')
+  @Audited('orders.update')
   update(
     @TenantId() tenantId: string,
     @Param('id') id: string,
@@ -123,6 +126,7 @@ export class OrdersController {
   }
 
   @Delete(':id')
+  @Audited('orders.remove')
   remove(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.orders.remove(tenantId, id);
   }

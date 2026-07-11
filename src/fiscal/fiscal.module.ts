@@ -3,7 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { Order, OrderSchema } from '../orders/schemas/order.schema';
 import { ProductVariant, ProductVariantSchema } from '../products/schemas/product-variant.schema';
 import { TenantsModule } from '../tenants/tenants.module';
-import { NuvemFiscalAdapter } from './adapters/nuvem-fiscal.adapter';
+import { FocusNfeAdapter } from './adapters/focus-nfe.adapter';
 import { FiscalController, FiscalHistoryController } from './fiscal.controller';
 import { FiscalService } from './fiscal.service';
 import { FiscalDocument, FiscalDocumentSchema } from './schemas/fiscal-document.schema';
@@ -18,7 +18,7 @@ import { FiscalDocument, FiscalDocumentSchema } from './schemas/fiscal-document.
     TenantsModule,
   ],
   controllers: [FiscalController, FiscalHistoryController],
-  providers: [FiscalService, NuvemFiscalAdapter],
+  providers: [FiscalService, FocusNfeAdapter],
   exports: [FiscalService],
 })
 export class FiscalModule {}

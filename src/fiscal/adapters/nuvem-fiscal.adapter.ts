@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import type { FiscalAmbiente } from '../../tenants/schemas/tenant.schema';
+import type { EmitNfceResult, NfceItem } from './fiscal-types';
 
 export type NuvemFiscalCredentials = {
   clientId: string;
@@ -9,22 +10,7 @@ export type NuvemFiscalCredentials = {
   cnpj: string;
 };
 
-export type NfceItem = {
-  descricao: string;
-  quantidade: number;
-  valorUnitario: number;
-  ncm?: string;
-};
-
-export type EmitNfceResult = {
-  ok: boolean;
-  providerId?: string;
-  status?: string;
-  chaveAcesso?: string;
-  qrCodeUrl?: string;
-  danfeUrl?: string;
-  error?: string;
-};
+export type { NfceItem, EmitNfceResult };
 
 const AUTH_URL = 'https://auth.nuvemfiscal.com.br/oauth/token';
 const API_BASE = 'https://api.nuvemfiscal.com.br';

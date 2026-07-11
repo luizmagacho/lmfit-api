@@ -52,6 +52,18 @@ export class OrderDraft {
   @Prop({ trim: true })
   paymentMethodChoice?: string;
 
+  @Prop({ trim: true })
+  shippingMethod?: string;
+
+  @Prop({ type: Number, default: 0 })
+  shippingCost: number;
+
+  @Prop({ trim: true, uppercase: true })
+  couponCode?: string;
+
+  @Prop({ type: Number, default: 0 })
+  discountTotal: number;
+
   @Prop({ type: Types.ObjectId, ref: 'User' })
   assignedSalesUserId?: Types.ObjectId;
 

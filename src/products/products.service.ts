@@ -28,10 +28,7 @@ import {
   productImportHeaderAliases,
 } from './product-excel.constants';
 import { LocationsService } from '../locations/locations.service';
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+import { buildSearchFilter, escapeRegex } from '../common/utils/text-search.util';
 
 function slugifyFromName(name: string): string {
   const s = name
@@ -534,15 +531,7 @@ export class ProductsService {
 
   async listProducts(tenantId: string, page: number, limit: number, search?: string) {
     const skip = skipFromPage(page, limit);
-    const q = search
-      ? {
-          tenantId: new Types.ObjectId(tenantId),
-          $or: [
-            { name: new RegExp(search, 'i') },
-            { slug: new RegExp(search, 'i') },
-          ],
-        }
-      : { tenantId: new Types.ObjectId(tenantId) };
+    const q = buildSearchFilter(tenantId, search, ['name', 'slug']);
     const [rawItems, total] = await Promise.all([
       this.productModel
         .find(q)
@@ -560,15 +549,7 @@ export class ProductsService {
   }
 
   private productListFilter(tenantId: string, search?: string) {
-    return search
-      ? {
-          tenantId: new Types.ObjectId(tenantId),
-          $or: [
-            { name: new RegExp(search, 'i') },
-            { slug: new RegExp(search, 'i') },
-          ],
-        }
-      : { tenantId: new Types.ObjectId(tenantId) };
+    return buildSearchFilter(tenantId, search, ['name', 'slug']);
   }
 
   async findAllProductsForExport(tenantId: string, search?: string) {
@@ -966,10 +947,20 @@ export class ProductsService {
     if (tenantId) {
       query.tenantId = new Types.ObjectId(tenantId);
     }
-    const v = await this.variantModel.findOne(query).exec();
-    if (!v) throw new NotFoundException();
-    const next = v.quantityOnHand + dto.delta;
-    if (next < 0) {
+    // Atomic $inc guarded by $gte on decrement: avoids a read-then-write race where
+    // two concurrent sales could both pass a stale stock check and oversell the
+    // last unit (findOne + compare + save is not safe under concurrency).
+    const decrementGuard = dto.delta < 0 ? { quantityOnHand: { $gte: -dto.delta } } : {};
+    const v = await this.variantModel
+      .findOneAndUpdate(
+        { ...query, ...decrementGuard },
+        { $inc: { quantityOnHand: dto.delta } },
+        { new: true },
+      )
+      .exec();
+    if (!v) {
+      const exists = await this.variantModel.findOne(query).exec();
+      if (!exists) throw new NotFoundException();
       throw new BadRequestException('Stock cannot go negative');
     }
     await this.ledgerModel.create({
@@ -981,22 +972,24 @@ export class ProductsService {
       orderId,
       createdBy: createdBy ? new Types.ObjectId(createdBy) : undefined,
     });
-    v.quantityOnHand = next;
-    await v.save();
     await this.locations.adjust(String(v.tenantId), v._id as Types.ObjectId, dto.delta);
 
     // Notify integrations of stock change
     this.eventEmitter.emit('stock.changed', {
       tenantId: String(v.tenantId),
       variantId: String(v._id),
-      newQuantity: next,
+      newQuantity: v.quantityOnHand,
       reason: dto.reason,
     });
 
     return v.toObject();
   }
 
-  /** Sum of sale + sale_reversal deltas for this order line (negative net = stock removed). */
+  /**
+   * Sum of sale + sale_reversal + return deltas for this order line (negative net = stock
+   * removed). Inclui 'return' pra evitar dupla contagem: se o módulo returns já devolveu
+   * parte/todo o estoque, cancelar/deletar o pedido depois não pode devolver de novo.
+   */
   async getNetOrderStockDelta(
     orderId: Types.ObjectId,
     variantId: Types.ObjectId,
@@ -1005,7 +998,7 @@ export class ProductsService {
     const query: Record<string, any> = {
       orderId,
       variantId,
-      reason: { $in: ['sale', 'sale_reversal'] },
+      reason: { $in: ['sale', 'sale_reversal', 'return'] },
     };
     if (tenantId) {
       query.tenantId = new Types.ObjectId(tenantId);

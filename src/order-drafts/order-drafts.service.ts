@@ -15,6 +15,7 @@ import { OrdersService } from '../orders/orders.service';
 import { PaymentsService } from '../payments/payments.service';
 import { CustomersService } from '../customers/customers.service';
 import { ProductsService } from '../products/products.service';
+import { PromotionsService } from '../promotions/promotions.service';
 import { ProductVariant } from '../products/schemas/product-variant.schema';
 import {
   ORDER_DRAFT_EXPORT_COLUMNS,
@@ -37,6 +38,7 @@ export class OrderDraftsService {
     private readonly payments: PaymentsService,
     private readonly customers: CustomersService,
     private readonly products: ProductsService,
+    private readonly promotions: PromotionsService,
     private readonly notify: NotificationsService,
     private readonly config: ConfigService,
     private readonly excel: ExcelSpreadsheetService,
@@ -84,9 +86,10 @@ export class OrderDraftsService {
     lines: NonNullable<PublicPatchDraftDto['lines']>,
     enforceStock: boolean,
     allowBackorder: boolean,
-  ): Promise<OrderDraft['lines']> {
-    if (!lines?.length) return [];
+  ): Promise<{ lines: OrderDraft['lines']; usesWholesale: boolean }> {
+    if (!lines?.length) return { lines: [], usesWholesale: false };
     const built: OrderDraft['lines'] = [];
+    let usesWholesale = false;
     for (const line of lines) {
       if (!Types.ObjectId.isValid(line.variantId)) {
         throw new BadRequestException('Invalid variant');
@@ -119,10 +122,9 @@ export class OrderDraftsService {
       // Price is always computed server-side from quantity + the product's own
       // wholesale rule — never trust a client-sent unit price (price manipulation risk).
       const pricing = await this.products.getWholesalePricing(tenantId, String(v._id));
-      const unitPrice =
-        pricing && line.quantity >= pricing.minWholesaleQty
-          ? pricing.priceWholesale
-          : (pricing?.priceRetail ?? v.price ?? 0);
+      const isWholesaleLine = !!(pricing && line.quantity >= pricing.minWholesaleQty);
+      if (isWholesaleLine) usesWholesale = true;
+      const unitPrice = isWholesaleLine ? pricing!.priceWholesale : (pricing?.priceRetail ?? v.price ?? 0);
       built.push({
         variantId: v._id as Types.ObjectId,
         quantity: line.quantity,
@@ -130,7 +132,16 @@ export class OrderDraftsService {
         isOrder,
       });
     }
-    return built;
+    return { lines: built, usesWholesale };
+  }
+
+  /** Cupom é mutuamente exclusivo com preço de atacado nesta v1 — evita empilhar dois descontos. */
+  private async cartUsesWholesale(tenantId: string, lines: OrderDraft['lines']): Promise<boolean> {
+    for (const l of lines) {
+      const pricing = await this.products.getWholesalePricing(tenantId, String(l.variantId));
+      if (pricing && l.quantity >= pricing.minWholesaleQty) return true;
+    }
+    return false;
   }
 
   private async applyDraftPatch(
@@ -143,11 +154,52 @@ export class OrderDraftsService {
   ): Promise<void> {
     this.assertDraftPatchable(doc, allowWhenLocked);
     if (dto.lines) {
-      doc.lines = await this.rebuildLinesFromDto(tenantId, dto.lines, enforceStock, allowBackorder);
+      const rebuilt = await this.rebuildLinesFromDto(tenantId, dto.lines, enforceStock, allowBackorder);
+      doc.lines = rebuilt.lines;
     }
     if (dto.status !== undefined) doc.status = dto.status;
     if (dto.paymentMethodChoice !== undefined) {
       doc.paymentMethodChoice = dto.paymentMethodChoice;
+    }
+    if (dto.shippingMethod !== undefined) {
+      doc.shippingMethod = dto.shippingMethod;
+    }
+    if (dto.shippingCost !== undefined) {
+      doc.shippingCost = dto.shippingCost;
+    }
+    if (dto.couponCode !== undefined) {
+      const code = dto.couponCode.trim();
+      if (!code) {
+        doc.couponCode = undefined;
+        doc.discountTotal = 0;
+      } else {
+        const usesWholesale = await this.cartUsesWholesale(tenantId, doc.lines);
+        if (usesWholesale) {
+          throw new BadRequestException('Cupom não pode ser combinado com preço de atacado');
+        }
+        const subtotal = doc.lines.reduce((acc, l) => acc + l.unitPrice * l.quantity, 0);
+        const { discountAmount } = await this.promotions.validateAndComputeDiscount(tenantId, code, subtotal);
+        doc.couponCode = code.toUpperCase();
+        doc.discountTotal = discountAmount;
+      }
+    } else if (dto.lines && doc.couponCode) {
+      // Linhas mudaram sem mexer no cupom — revalida contra o novo subtotal.
+      // Se o cupom não qualifica mais (ex.: caiu abaixo do mínimo), remove em silêncio
+      // em vez de travar a atualização do carrinho.
+      try {
+        const usesWholesale = await this.cartUsesWholesale(tenantId, doc.lines);
+        if (usesWholesale) throw new BadRequestException('wholesale conflict');
+        const subtotal = doc.lines.reduce((acc, l) => acc + l.unitPrice * l.quantity, 0);
+        const { discountAmount } = await this.promotions.validateAndComputeDiscount(
+          tenantId,
+          doc.couponCode,
+          subtotal,
+        );
+        doc.discountTotal = discountAmount;
+      } catch {
+        doc.couponCode = undefined;
+        doc.discountTotal = 0;
+      }
     }
     if (dto.customerId !== undefined) {
       doc.customerId = dto.customerId
@@ -256,11 +308,19 @@ export class OrderDraftsService {
     if (doc.metadata && typeof doc.metadata === 'object' && 'customer' in doc.metadata) {
       const custData = (doc.metadata as any).customer;
       if (custData && custData.name && custData.phone) {
-        const totalVal = doc.lines.reduce((acc, l) => acc + (l.unitPrice * l.quantity), 0);
+        const totalVal =
+          doc.lines.reduce((acc, l) => acc + (l.unitPrice * l.quantity), 0) +
+          (doc.shippingCost ?? 0) -
+          (doc.discountTotal ?? 0);
         const fmtTotal = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalVal);
         referenceString = `WhatsApp: ${custData.name} - ${custData.phone} - ${fmtTotal}`;
       }
     }
+
+    // A confirmação atômica do cupom (redeem) acontece dentro de OrdersService.create(),
+    // não aqui — é o mesmo chokepoint usado pela criação direta de pedido no admin/PDV,
+    // então o uso nunca é contado duas vezes nem pulado por um dos dois caminhos.
+
     if (body?.payment?.method === 'pix') {
       const order = await this.orders.create(
         tenantId,
@@ -271,6 +331,10 @@ export class OrderDraftsService {
           reference: referenceString,
           notes: notesParts.length ? notesParts.join('\n') : undefined,
           lines: lineInputs,
+          shippingMethod: doc.shippingMethod,
+          shippingCost: doc.shippingCost,
+          couponCode: doc.couponCode,
+          discountTotal: doc.discountTotal,
         },
         undefined,
       );
@@ -309,6 +373,10 @@ export class OrderDraftsService {
           reference: referenceString,
           notes: notesParts.length ? notesParts.join('\n') : undefined,
           lines: lineInputs,
+          shippingMethod: doc.shippingMethod,
+          shippingCost: doc.shippingCost,
+          couponCode: doc.couponCode,
+          discountTotal: doc.discountTotal,
         },
         undefined,
       );
@@ -342,6 +410,10 @@ export class OrderDraftsService {
       reference: referenceString,
       notes: notesParts.length ? notesParts.join('\n') : undefined,
       lines: lineInputs,
+      shippingMethod: doc.shippingMethod,
+      shippingCost: doc.shippingCost,
+      couponCode: doc.couponCode,
+      discountTotal: doc.discountTotal,
     });
     doc.orderId = order._id as Types.ObjectId;
     doc.status = 'submitted';

@@ -5,6 +5,7 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { TenantId } from '../common/decorators/tenant-id.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { Audited } from '../audit/audited.decorator';
 import { FiscalService } from './fiscal.service';
 
 @ApiTags('fiscal')
@@ -16,6 +17,7 @@ export class FiscalController {
   constructor(private readonly fiscal: FiscalService) {}
 
   @Post('emit')
+  @Audited('fiscal.emit')
   emit(@TenantId() tenantId: string, @Param('orderId') orderId: string) {
     return this.fiscal.emitForOrder(tenantId, orderId);
   }

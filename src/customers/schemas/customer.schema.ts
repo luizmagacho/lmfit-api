@@ -39,9 +39,25 @@ export class Customer {
   @Prop({ type: Boolean, default: false })
   marketingOptIn: boolean;
 
+  /** Saldo de crédito de loja (vale-troca) em reais, gerado por devoluções. */
+  @Prop({ type: Number, default: 0 })
+  storeCreditBalance: number;
+
+  /** Pontos de fidelidade acumulados (ver módulo loyalty). */
+  @Prop({ type: Number, default: 0 })
+  loyaltyPoints: number;
+
+  /** Tags livres pra segmentação (CRM). */
+  @Prop({ type: [String], default: [] })
+  tags: string[];
+
   @Prop({ type: Types.ObjectId, ref: 'User' })
   createdBy?: Types.ObjectId;
 }
 
 export const CustomerSchema = SchemaFactory.createForClass(Customer);
 CustomerSchema.index({ tenantId: 1, createdAt: -1 });
+CustomerSchema.index(
+  { name: 'text', email: 'text', phone: 'text' },
+  { weights: { name: 10, email: 5, phone: 5 }, name: 'customer_text_search' },
+);

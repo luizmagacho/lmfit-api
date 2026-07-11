@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { TenantId } from '../common/decorators/tenant-id.decorator';
+import { Audited } from '../audit/audited.decorator';
 import { LocationsService } from './locations.service';
 import { CreateLocationDto } from './dto/create-location.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
@@ -28,6 +29,7 @@ export class LocationsController {
   }
 
   @Post('transfer')
+  @Audited('locations.transfer')
   transfer(@TenantId() tenantId: string, @Body() dto: TransferStockDto) {
     return this.locations.transfer(tenantId, dto);
   }

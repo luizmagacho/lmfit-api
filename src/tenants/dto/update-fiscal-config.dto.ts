@@ -22,12 +22,19 @@ export class UpdateFiscalConfigDto {
   @IsIn(['homologacao', 'producao'])
   ambiente?: 'homologacao' | 'producao';
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Token do emitente no painel Focus NFe' })
+  @IsOptional()
+  @IsString()
+  focusNfeToken?: string;
+
+  /** @deprecated Nuvem Fiscal descontinuada — aceito só por retrocompatibilidade. */
+  @ApiPropertyOptional({ deprecated: true })
   @IsOptional()
   @IsString()
   nuvemFiscalClientId?: string;
 
-  @ApiPropertyOptional()
+  /** @deprecated ver `nuvemFiscalClientId`. */
+  @ApiPropertyOptional({ deprecated: true })
   @IsOptional()
   @IsString()
   nuvemFiscalClientSecret?: string;

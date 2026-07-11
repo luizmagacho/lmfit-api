@@ -4,7 +4,7 @@ import { Model, Types } from 'mongoose';
 import { Order } from '../orders/schemas/order.schema';
 import { ProductVariant } from '../products/schemas/product-variant.schema';
 import { TenantsService } from '../tenants/tenants.service';
-import { NuvemFiscalAdapter } from './adapters/nuvem-fiscal.adapter';
+import { FocusNfeAdapter } from './adapters/focus-nfe.adapter';
 import { FiscalDocument, FiscalDocumentDocument } from './schemas/fiscal-document.schema';
 
 @Injectable()
@@ -14,15 +14,15 @@ export class FiscalService {
     @InjectModel(Order.name) private readonly orderModel: Model<Order>,
     @InjectModel(ProductVariant.name) private readonly variantModel: Model<ProductVariant>,
     private readonly tenants: TenantsService,
-    private readonly nuvemFiscal: NuvemFiscalAdapter,
+    private readonly focusNfe: FocusNfeAdapter,
   ) {}
 
   private async requireFiscalConfig(tenantId: string) {
     const tenant = await this.tenants.findById(tenantId);
     const fiscal = tenant?.fiscal;
-    if (!fiscal?.cnpj || !fiscal?.nuvemFiscalClientId || !fiscal?.nuvemFiscalClientSecret) {
+    if (!fiscal?.cnpj || !fiscal?.focusNfeToken) {
       throw new BadRequestException(
-        'Configuração fiscal incompleta: cadastre CNPJ e credenciais Nuvem Fiscal em /tenants/:id/fiscal antes de emitir.',
+        'Configuração fiscal incompleta: cadastre CNPJ e o token da Focus NFe em /tenants/:id/fiscal antes de emitir.',
       );
     }
     return fiscal;
@@ -70,10 +70,9 @@ export class FiscalService {
       amount: order.total ?? 0,
     });
 
-    const result = await this.nuvemFiscal.emitNfce(
+    const result = await this.focusNfe.emitNfce(
       {
-        clientId: fiscal.nuvemFiscalClientId!,
-        clientSecret: fiscal.nuvemFiscalClientSecret!,
+        token: fiscal.focusNfeToken!,
         ambiente: fiscal.ambiente ?? 'homologacao',
         cnpj: fiscal.cnpj!,
       },

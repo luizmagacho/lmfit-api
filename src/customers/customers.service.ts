@@ -9,6 +9,7 @@ import type { StaffImportResponse } from '../common/dto/staff-import.response';
 import { ExcelSpreadsheetService } from '../common/excel/excel-spreadsheet.service';
 import { parseBooleanLoose } from '../common/excel/cell-coerce';
 import { skipFromPage } from '../common/dto/pagination-query.dto';
+import { buildSearchFilter } from '../common/utils/text-search.util';
 import {
   CUSTOMER_EXPORT_COLUMNS,
   customerImportHeaderAliases,
@@ -33,14 +34,7 @@ export class CustomersService {
   }
 
   private listFilter(tenantId: string, search?: string) {
-    const base: Record<string, any> = { tenantId: new Types.ObjectId(tenantId) };
-    if (search) {
-      base.$or = [
-        { name: new RegExp(search, 'i') },
-        { email: new RegExp(search, 'i') },
-      ];
-    }
-    return base;
+    return buildSearchFilter(tenantId, search, ['name', 'email', 'phone']);
   }
 
   async findAll(tenantId: string, page: number, limit: number, search?: string) {

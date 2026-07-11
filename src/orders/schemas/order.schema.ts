@@ -25,6 +25,8 @@ const OrderLineSchema = new MSchema(
     productionPrice: { type: Number, default: 0 },
     description: { type: String },
     isOrder: { type: Boolean, default: false },
+    /** Soma de unidades já devolvidas/trocadas desta linha (ver módulo returns). */
+    returnedQty: { type: Number, default: 0 },
   },
   { _id: false },
 );
@@ -64,6 +66,18 @@ export class Order {
   @Prop({ trim: true })
   notes?: string;
 
+  @Prop({ trim: true })
+  shippingMethod?: string;
+
+  @Prop({ type: Number, default: 0 })
+  shippingCost: number;
+
+  @Prop({ trim: true, uppercase: true })
+  couponCode?: string;
+
+  @Prop({ type: Number, default: 0 })
+  discountTotal: number;
+
   @Prop({ type: [OrderLineSchema], default: [] })
   lines: Array<{
     variantId: Types.ObjectId;
@@ -72,6 +86,7 @@ export class Order {
     productionPrice?: number;
     description?: string;
     isOrder?: boolean;
+    returnedQty?: number;
   }>;
 
   @Prop({ type: Types.ObjectId, ref: 'User' })
