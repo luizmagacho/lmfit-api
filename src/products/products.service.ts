@@ -793,6 +793,30 @@ export class ProductsService {
     };
   }
 
+  /**
+   * Busca exata por código de barras — usada pelo scanner de câmera no PDV.
+   * Tenta a variante primeiro (caso comum: cor/tamanho tem EAN próprio),
+   * cai pro código de barras do produto se nenhuma variante bater.
+   */
+  async findByBarcode(tenantId: string, code: string): Promise<{ product: Record<string, unknown>; variantId?: string }> {
+    const trimmed = code.trim();
+    if (!trimmed) throw new NotFoundException('Código de barras vazio');
+    const tid = new Types.ObjectId(tenantId);
+
+    const variant = await this.variantModel.findOne({ tenantId: tid, barcode: trimmed }).lean().exec();
+    if (variant) {
+      const product = await this.getProduct(tenantId, String(variant.productId));
+      return { product, variantId: String(variant._id) };
+    }
+
+    const product = await this.productModel.findOne({ tenantId: tid, barcode: trimmed }).lean().exec();
+    if (product) {
+      return { product: await this.getProduct(tenantId, String(product._id)) };
+    }
+
+    throw new NotFoundException(`Nenhum produto encontrado com o código ${trimmed}`);
+  }
+
   async getProduct(tenantId: string, id: string) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
     const p = await this.productModel.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).lean().exec();

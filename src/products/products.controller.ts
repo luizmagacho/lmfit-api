@@ -148,6 +148,15 @@ export class ProductsController {
     return this.products.bulkPatch(tenantId, dto);
   }
 
+  /** Busca exata por código de barras — usada pelo scanner de câmera no PDV. */
+  @Get('barcode/:code')
+  getByBarcode(
+    @Param('code') code: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.products.findByBarcode(tenantId, code);
+  }
+
   @Get(':id')
   getOne(
     @Param('id') id: string,
