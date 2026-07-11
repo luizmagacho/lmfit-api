@@ -31,6 +31,32 @@ export class TenantLimits {
   @Prop({ default: 1 }) maxUsers: number;
 }
 
+/** Fidelidade/cashback: pontos ganhos por real gasto, resgatáveis em crédito de loja. */
+export class LoyaltyConfig {
+  @Prop({ default: false }) enabled: boolean;
+  @Prop({ default: 1 }) pointsPerBRL: number;
+  @Prop({ default: 0.01 }) redeemValuePerPoint: number;
+}
+
+export type FiscalRegime = 'simples_nacional' | 'lucro_presumido' | 'lucro_real';
+export type FiscalAmbiente = 'homologacao' | 'producao';
+
+/** Fiscal identity + emitter credentials used to emit NF-e/NFC-e for this tenant. */
+export class FiscalConfig {
+  @Prop({ trim: true }) cnpj?: string;
+  @Prop({ trim: true }) inscricaoEstadual?: string;
+  @Prop({ type: String, enum: ['simples_nacional', 'lucro_presumido', 'lucro_real'] })
+  regimeTributario?: FiscalRegime;
+  @Prop({ type: String, enum: ['homologacao', 'producao'], default: 'homologacao' })
+  ambiente: FiscalAmbiente;
+  /** Token do emitente cadastrado no painel Focus NFe (substitui a Nuvem Fiscal, desativada em 31/07/2026). */
+  @Prop({ trim: true }) focusNfeToken?: string;
+  /** @deprecated Nuvem Fiscal foi descontinuada — mantido só pra não perder dados de tenants antigos. */
+  @Prop({ trim: true }) nuvemFiscalClientId?: string;
+  /** @deprecated ver `nuvemFiscalClientId`. */
+  @Prop({ trim: true }) nuvemFiscalClientSecret?: string;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main schema                                                       */
 /* ------------------------------------------------------------------ */
@@ -62,6 +88,12 @@ export class Tenant {
 
   @Prop({ type: TenantLimits, default: () => ({}) })
   limits: TenantLimits;
+
+  @Prop({ type: FiscalConfig, default: () => ({}) })
+  fiscal: FiscalConfig;
+
+  @Prop({ type: LoyaltyConfig, default: () => ({}) })
+  loyalty: LoyaltyConfig;
 
   @Prop({ trim: true })
   geminiApiKey?: string;

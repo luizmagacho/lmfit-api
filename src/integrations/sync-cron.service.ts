@@ -46,6 +46,26 @@ export class SyncCronService {
         }
       }
 
+      // Pedidos: emite fiscal + sobe nota (TikTok Shop) automaticamente, sem precisar de clique manual.
+      const orderIntegrations: IntegrationDocument[] = await this.integrationModel.find({
+        active: true,
+        syncOrders: true,
+      });
+      for (const integration of orderIntegrations) {
+        try {
+          const result = await this.syncEngine.syncOrders(String(integration.tenantId), String(integration._id));
+          if (result.imported || result.failed) {
+            this.logger.log(
+              `Order sync for ${integration.platform}: ${result.imported} imported, ${result.skipped} skipped, ${result.failed} failed`,
+            );
+          }
+        } catch (error: any) {
+          this.logger.error(
+            `Failed to sync orders for tenant ${integration.tenantId} platform ${integration.platform}: ${error.message}`,
+          );
+        }
+      }
+
       this.logger.log('Periodic sync completed.');
     } catch (error: any) {
       this.logger.error(`Failed to retrieve integrations for periodic sync: ${error.message}`);

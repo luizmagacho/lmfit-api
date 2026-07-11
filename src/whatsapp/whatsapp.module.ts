@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { CustomersModule } from '../customers/customers.module';
-import { GeminiModule } from '../gemini/gemini.module';
+import { LlmModule } from '../llm/llm.module';
 import { OrdersModule } from '../orders/orders.module';
 import { PurchasesModule } from '../purchases/purchases.module';
 import { SuppliersModule } from '../suppliers/suppliers.module';
@@ -20,7 +20,7 @@ import { WhatsappWebhookController } from './whatsapp-webhook.controller';
       { name: WhatsAppMessage.name, schema: WhatsAppMessageSchema },
       { name: WhatsAppSender.name, schema: WhatsAppSenderSchema },
     ]),
-    GeminiModule,
+    LlmModule,
     OrdersModule,
     PurchasesModule,
     CustomersModule,

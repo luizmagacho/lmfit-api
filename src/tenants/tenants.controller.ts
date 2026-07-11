@@ -17,6 +17,8 @@ import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { CreateTenantRequestDto } from './dto/create-tenant-request.dto';
 import { UpdateBrandingDto } from './dto/update-branding.dto';
+import { UpdateFiscalConfigDto } from './dto/update-fiscal-config.dto';
+import { UpdateLoyaltyConfigDto } from './dto/update-loyalty-config.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { TenantsService } from './tenants.service';
 
@@ -58,6 +60,16 @@ export class TenantsController {
   @Patch(':id/branding')
   updateBranding(@Param('id') id: string, @Body() dto: UpdateBrandingDto) {
     return this.tenants.updateBranding(id, dto);
+  }
+
+  @Patch(':id/fiscal')
+  updateFiscalConfig(@Param('id') id: string, @Body() dto: UpdateFiscalConfigDto) {
+    return this.tenants.updateFiscalConfig(id, dto);
+  }
+
+  @Patch(':id/loyalty')
+  updateLoyaltyConfig(@Param('id') id: string, @Body() dto: UpdateLoyaltyConfigDto) {
+    return this.tenants.updateLoyaltyConfig(id, dto);
   }
 
   @Delete(':id')

@@ -10,6 +10,7 @@ import { SyncEngineService } from './sync-engine.service';
 import { ProductMappingService } from './product-mapping.service';
 import { CreateIntegrationDto } from './dto/create-integration.dto';
 import { UpdateIntegrationDto } from './dto/update-integration.dto';
+import { ConnectTiktokDto } from './dto/connect-tiktok.dto';
 
 @Controller('integrations')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -29,6 +30,12 @@ export class IntegrationsController {
   @Post()
   create(@TenantId() tenantId: string, @Body() dto: CreateIntegrationDto) {
     return this.integrationsService.create(tenantId, dto);
+  }
+
+  /** Fluxo dedicado: troca o auth_code da autorização TikTok Shop e já cria a integração. */
+  @Post('tiktok/connect')
+  connectTiktok(@TenantId() tenantId: string, @Body() dto: ConnectTiktokDto) {
+    return this.integrationsService.connectTiktok(tenantId, dto);
   }
 
   @Get(':id')

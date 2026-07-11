@@ -57,3 +57,7 @@ export class Product {
 export const ProductSchema = SchemaFactory.createForClass(Product);
 ProductSchema.index({ tenantId: 1, slug: 1 }, { unique: true });
 ProductSchema.index({ tenantId: 1, createdAt: -1 });
+ProductSchema.index(
+  { name: 'text', description: 'text', slug: 'text' },
+  { weights: { name: 10, slug: 5, description: 1 }, name: 'product_text_search' },
+);

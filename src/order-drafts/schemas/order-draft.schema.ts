@@ -14,6 +14,8 @@ const DraftLineSchema = new MSchema(
     variantId: { type: Types.ObjectId, ref: 'ProductVariant', required: true },
     quantity: { type: Number, required: true, min: 1 },
     unitPrice: { type: Number, required: true, min: 0 },
+    /** true = encomenda (excede o estoque, não deduz saldo); ver ProductVariant.acceptsBackorder. */
+    isOrder: { type: Boolean, default: false },
   },
   { _id: false },
 );
@@ -44,10 +46,23 @@ export class OrderDraft {
     variantId: Types.ObjectId;
     quantity: number;
     unitPrice: number;
+    isOrder?: boolean;
   }>;
 
   @Prop({ trim: true })
   paymentMethodChoice?: string;
+
+  @Prop({ trim: true })
+  shippingMethod?: string;
+
+  @Prop({ type: Number, default: 0 })
+  shippingCost: number;
+
+  @Prop({ trim: true, uppercase: true })
+  couponCode?: string;
+
+  @Prop({ type: Number, default: 0 })
+  discountTotal: number;
 
   @Prop({ type: Types.ObjectId, ref: 'User' })
   assignedSalesUserId?: Types.ObjectId;

@@ -14,8 +14,9 @@ import { skipFromPage } from '../common/dto/pagination-query.dto';
 import { ProductsService } from '../products/products.service';
 import { ProductVariant } from '../products/schemas/product-variant.schema';
 import { PurchasesService } from '../purchases/purchases.service';
-import type { CreatePublicOrderDto } from './dto/create-public-order.dto';
 import type { CreateOrderDto } from './dto/create-order.dto';
+import { LoyaltyService } from '../loyalty/loyalty.service';
+import { PromotionsService } from '../promotions/promotions.service';
 import type { OrderLineInputDto } from './dto/order-line-input.dto';
 import type { UpdateOrderDto } from './dto/update-order.dto';
 import { ORDER_EXPORT_COLUMNS, orderImportHeaderAliases } from './order-excel.constants';
@@ -44,6 +45,8 @@ export class OrdersService {
     private readonly excel: ExcelSpreadsheetService,
     private readonly products: ProductsService,
     private readonly purchases: PurchasesService,
+    private readonly loyalty: LoyaltyService,
+    private readonly promotions: PromotionsService,
     @Inject(forwardRef(() => PaymentsService))
     private readonly payments: any,
   ) {}
@@ -235,6 +238,16 @@ export class OrdersService {
     } else if (!isStockAppliedStatus(status) && dto.total !== undefined) {
       total = dto.total;
     }
+    const shippingCost = dto.shippingCost ?? 0;
+    const discountTotal = dto.discountTotal ?? 0;
+    total = Math.max(0, total + shippingCost - discountTotal);
+
+    // Confirma o cupom de forma atômica antes de criar o pedido — único chokepoint de
+    // redenção (usado tanto pela criação direta no admin/PDV quanto pelo submit de
+    // order-drafts), evita contar o mesmo cupom duas vezes ou pular a contagem.
+    if (dto.couponCode) {
+      await this.promotions.redeem(tenantId, dto.couponCode);
+    }
 
     const warnings = await this.buildWarnings(tenantId, lines);
 
@@ -254,6 +267,10 @@ export class OrdersService {
       total,
       notes: dto.notes,
       lines,
+      shippingMethod: dto.shippingMethod,
+      shippingCost,
+      couponCode: dto.couponCode,
+      discountTotal,
       createdBy: createdBy ? new Types.ObjectId(createdBy) : undefined,
       operatorUserId:
         dto.operatorUserId && Types.ObjectId.isValid(dto.operatorUserId)
@@ -265,12 +282,23 @@ export class OrdersService {
     const oid = created._id as Types.ObjectId;
     const stockLines = lines.filter(l => !(l as any).isOrder);
     if (isStockAppliedStatus(status) && stockLines.length) {
-      await this.products.applySaleDeductionsForOrder(
-        oid,
-        stockLines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
-        createdBy,
-        tenantId,
-      );
+      try {
+        await this.products.applySaleDeductionsForOrder(
+          oid,
+          stockLines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
+          createdBy,
+          tenantId,
+        );
+      } catch (e) {
+        // Atomic decrement lost the race (concurrent sale took the last unit) —
+        // don't leave a ghost order pointing at stock that was never actually deducted.
+        await created.deleteOne();
+        throw e;
+      }
+    }
+
+    if (status === 'completed') {
+      await this.loyalty.creditForOrder(tenantId, created.customerId, total);
     }
 
     return this.toResponse(
@@ -282,12 +310,13 @@ export class OrdersService {
   private listFilter(tenantId: string, search?: string, channel?: string) {
     const parts: Record<string, unknown>[] = [{ tenantId: new Types.ObjectId(tenantId) }];
     if (search) {
-      parts.push({
-        $or: [
-          { reference: new RegExp(search, 'i') },
-          { notes: new RegExp(search, 'i') },
-        ],
-      });
+      const or: Record<string, unknown>[] = [
+        { reference: new RegExp(search, 'i') },
+        { notes: new RegExp(search, 'i') },
+      ];
+      const asNumber = Number(search);
+      if (Number.isInteger(asNumber)) or.push({ number: asNumber });
+      parts.push({ $or: or });
     }
     if (channel && (ORDER_CHANNELS as readonly string[]).includes(channel)) {
       parts.push({ channel });
@@ -531,6 +560,14 @@ export class OrdersService {
     };
   }
 
+  /** Usado por integrações de marketplace pra checar se um pedido externo já foi importado (dedupe por reference). */
+  async findByReference(tenantId: string, reference: string) {
+    return this.model
+      .findOne({ tenantId: new Types.ObjectId(tenantId), reference })
+      .lean()
+      .exec();
+  }
+
   async findOne(tenantId: string, id: string): Promise<OrderResponse> {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
     const doc = await this.model.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).lean().exec();
@@ -618,6 +655,9 @@ export class OrdersService {
     if (!wasApplied && willApply && newStatus === 'completed') {
       await this.payments.syncPaymentPaidForOrder(tenantId, existing._id as Types.ObjectId);
     }
+    if (oldStatus !== 'completed' && newStatus === 'completed') {
+      await this.loyalty.creditForOrder(tenantId, existing.customerId, existing.total);
+    }
     if (
       newStatus === 'cancelled' &&
       oldStatus === 'open' &&
@@ -628,48 +668,6 @@ export class OrdersService {
 
     const lean = existing.toObject();
     return this.toResponse(lean as unknown as Record<string, unknown>, warnings);
-  }
-
-  async createFromPublic(tenantId: string, dto: CreatePublicOrderDto): Promise<Record<string, unknown>> {
-    if (dto.payment?.method === 'pix') {
-      const res = await this.create(
-        tenantId,
-        {
-          customerId: dto.customerId,
-          channel: dto.channel ?? 'online',
-          status: 'open',
-          lines: dto.lines,
-          reference: dto.reference,
-          notes: dto.notes,
-        },
-        undefined,
-      );
-      const total = Number(res.total ?? 0);
-      const pay = await this.payments.createPixPayment(tenantId, String(res._id), total);
-      return {
-        orderId: String(res._id),
-        warnings: res.warnings,
-        payment: {
-          paymentId: String(pay._id),
-          qrCode: pay.qrCode,
-          qrCodeImage: pay.qrCodeImage,
-          expiresAt: (pay.expiresAt as Date).toISOString(),
-        },
-      };
-    }
-    const res = await this.create(
-      tenantId,
-      {
-        customerId: dto.customerId,
-        channel: dto.channel ?? 'online',
-        status: 'open',
-        lines: dto.lines,
-        reference: dto.reference,
-        notes: dto.notes,
-      },
-      undefined,
-    );
-    return { orderId: String(res._id), warnings: res.warnings };
   }
 
   async remove(tenantId: string, id: string) {

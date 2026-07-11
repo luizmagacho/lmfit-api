@@ -60,6 +60,25 @@ export class PublicPatchDraftDto {
   @IsString()
   paymentMethodChoice?: string;
 
+  @ApiPropertyOptional({ description: 'Método de frete escolhido (pickup, standard, express).' })
+  @IsOptional()
+  @IsString()
+  shippingMethod?: string;
+
+  @ApiPropertyOptional({ description: 'Valor do frete calculado no front, aplicado ao total no submit.' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  shippingCost?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Código do cupom a aplicar. Envie string vazia pra remover. O desconto nunca vem do client — é sempre recalculado no servidor a partir da regra cadastrada.',
+  })
+  @IsOptional()
+  @IsString()
+  couponCode?: string;
+
   @ApiPropertyOptional({
     description: 'Substitui ou mescla metadados do rascunho (customer, shipping, …).',
     type: 'object',

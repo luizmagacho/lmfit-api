@@ -6,10 +6,11 @@ import {
 } from '../products/schemas/product-variant.schema';
 import { ProductsModule } from '../products/products.module';
 import { PurchasesModule } from '../purchases/purchases.module';
+import { LoyaltyModule } from '../loyalty/loyalty.module';
+import { PromotionsModule } from '../promotions/promotions.module';
 import { Order, OrderSchema } from './schemas/order.schema';
 import { PaymentsModule } from '../payments/payments.module';
 import { OrdersController } from './orders.controller';
-import { PublicOrdersController } from './public-orders.controller';
 import { OrdersService } from './orders.service';
 
 @Module({
@@ -20,9 +21,11 @@ import { OrdersService } from './orders.service';
     ]),
     ProductsModule,
     PurchasesModule,
+    LoyaltyModule,
+    PromotionsModule,
     forwardRef(() => PaymentsModule),
   ],
-  controllers: [OrdersController, PublicOrdersController],
+  controllers: [OrdersController],
   providers: [OrdersService],
   exports: [OrdersService],
 })

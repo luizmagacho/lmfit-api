@@ -67,4 +67,27 @@ export class CreateOrderDto {
   @ValidateNested({ each: true })
   @Type(() => OrderLineInputDto)
   lines?: OrderLineInputDto[];
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  shippingMethod?: string;
+
+  @ApiPropertyOptional({ default: 0, description: 'Número ou string BRL / só dígitos como centavos' })
+  @IsOptional()
+  @BrlMoney()
+  @IsNumber()
+  @Min(0)
+  shippingCost?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  couponCode?: string;
+
+  @ApiPropertyOptional({ default: 0, description: 'Desconto já validado pelo módulo promotions' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  discountTotal?: number;
 }

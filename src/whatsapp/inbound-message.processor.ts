@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type { HydratedDocument } from 'mongoose';
 import { Types } from 'mongoose';
 import { CustomersService } from '../customers/customers.service';
-import { GeminiService } from '../gemini/gemini.service';
+import { LlmService } from '../llm/llm.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OrdersService } from '../orders/orders.service';
 import { PurchasesService } from '../purchases/purchases.service';
@@ -20,7 +20,7 @@ export class InboundMessageProcessor {
     private readonly config: ConfigService,
     private readonly senders: WhatsappSendersService,
     private readonly messages: WhatsappMessagesService,
-    private readonly gemini: GeminiService,
+    private readonly llm: LlmService,
     private readonly orders: OrdersService,
     private readonly purchases: PurchasesService,
     private readonly customers: CustomersService,
@@ -61,7 +61,7 @@ export class InboundMessageProcessor {
 
     let parsed;
     try {
-      parsed = await this.gemini.parseIntent(text);
+      parsed = await this.llm.parseIntent(text);
     } catch (e) {
       this.log.error(e);
       await this.messages.updateOne(wamid, {

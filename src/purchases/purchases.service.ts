@@ -18,6 +18,7 @@ import {
 import { Purchase } from './schemas/purchase.schema';
 import { ProductVariant } from '../products/schemas/product-variant.schema';
 import { Material } from '../materials/schemas/material.schema';
+import { LocationsService } from '../locations/locations.service';
 
 @Injectable()
 export class PurchasesService {
@@ -26,6 +27,7 @@ export class PurchasesService {
     @InjectModel(ProductVariant.name) private readonly variantModel: Model<ProductVariant>,
     @InjectModel(Material.name) private readonly materialModel: Model<Material>,
     private readonly excel: ExcelSpreadsheetService,
+    private readonly locations: LocationsService,
   ) {}
 
   async create(tenantId: string, dto: CreatePurchaseDto, createdBy?: string) {
@@ -354,6 +356,7 @@ export class PurchasesService {
           { _id: line.variantId },
           { $inc: { quantityOnHand: qty } }
         ).exec();
+        await this.locations.adjust(String(doc.tenantId), line.variantId, qty);
       } else if (line.materialId) {
         await this.materialModel.updateOne(
           { _id: line.materialId },

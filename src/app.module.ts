@@ -6,22 +6,30 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ServeStaticModule } from '@nestjs/serve-static';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AlertsModule } from './alerts/alerts.module';
 import { AppController } from './app.controller';
+import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { CatalogModule } from './catalog/catalog.module';
+import { ChatModule } from './chat/chat.module';
 import { ExcelModule } from './common/excel/excel.module';
+import { FiscalModule } from './fiscal/fiscal.module';
 import { CustomersModule } from './customers/customers.module';
 import { IntegrationsModule } from './integrations/integrations.module';
+import { LeadsModule } from './leads/leads.module';
+import { LoyaltyModule } from './loyalty/loyalty.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { JwtRegisteredModule } from './jwt/jwt-registered.module';
+import { LocationsModule } from './locations/locations.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { OrderDraftsModule } from './order-drafts/order-drafts.module';
 import { OrdersModule } from './orders/orders.module';
 import { ProductsModule } from './products/products.module';
 import { PurchasesModule } from './purchases/purchases.module';
+import { PromotionsModule } from './promotions/promotions.module';
 import { ReportsModule } from './reports/reports.module';
+import { ReturnsModule } from './returns/returns.module';
 import { SeedModule } from './seed/seed.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { UsersModule } from './users/users.module';
@@ -32,6 +40,7 @@ import { MaterialsModule } from './materials/materials.module';
 import { BillingModule } from './billing/billing.module';
 import { TenantsModule } from './tenants/tenants.module';
 import { TenantSubscriptionGuard } from './common/guards/tenant-subscription.guard';
+import { TenantThrottlerGuard } from './common/guards/tenant-throttler.guard';
 import { TenantMiddleware } from './common/middleware/tenant.middleware';
 
 @Module({
@@ -48,6 +57,7 @@ import { TenantMiddleware } from './common/middleware/tenant.middleware';
       { name: 'default', ttl: 60_000, limit: 120 },
     ]),
     MongooseModule.forRoot(process.env.MONGODB_URI ?? 'mongodb://127.0.0.1:27017/lmfit'),
+    AuditModule,
     ExcelModule,
     JwtRegisteredModule,
     NotificationsModule,
@@ -57,12 +67,17 @@ import { TenantMiddleware } from './common/middleware/tenant.middleware';
     CustomersModule,
     SuppliersModule,
     OrdersModule,
+    ReturnsModule,
+    PromotionsModule,
     PurchasesModule,
     InvoicesModule,
     ProductsModule,
+    LocationsModule,
     AlertsModule,
     ReportsModule,
+    FiscalModule,
     CatalogModule,
+    ChatModule,
     OrderDraftsModule,
     WhatsappModule,
     CashflowModule,
@@ -71,12 +86,14 @@ import { TenantMiddleware } from './common/middleware/tenant.middleware';
     BillingModule,
     TenantsModule,
     IntegrationsModule,
+    LeadsModule,
+    LoyaltyModule,
   ],
   controllers: [AppController],
   providers: [
     {
       provide: APP_GUARD,
-      useClass: ThrottlerGuard,
+      useClass: TenantThrottlerGuard,
     },
     {
       provide: APP_GUARD,

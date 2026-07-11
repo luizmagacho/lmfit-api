@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsArray, IsEnum, IsMongoId, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsEnum, IsMongoId, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { PublicCreateDraftDto, PublicDraftLineDto } from './public-patch-draft.dto';
 
 /** Staff POST /order-drafts — same writable fields as public draft creation */
@@ -24,6 +24,22 @@ export class StaffPatchOrderDraftDto {
   @IsOptional()
   @IsString()
   paymentMethodChoice?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  shippingMethod?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  shippingCost?: number;
+
+  @ApiPropertyOptional({ description: 'Código do cupom — desconto recalculado no servidor.' })
+  @IsOptional()
+  @IsString()
+  couponCode?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

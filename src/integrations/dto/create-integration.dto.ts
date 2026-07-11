@@ -8,10 +8,12 @@ export class IntegrationCredentialsDto {
   @IsOptional() @IsString() applicationKey?: string;
   @IsOptional() @IsString() storeId?: string;
   @IsOptional() @IsString() storeDomain?: string;
+  @IsOptional() @IsString() refreshToken?: string;
+  @IsOptional() @IsString() shopCipher?: string;
 }
 
 export class CreateIntegrationDto {
-  @IsEnum(['bagy', 'nuvemshop', 'tray', 'loja_integrada', 'shopify'])
+  @IsEnum(['bagy', 'nuvemshop', 'tray', 'loja_integrada', 'shopify', 'mercadolivre', 'shopee', 'tiktok'])
   platform: IntegrationPlatform;
 
   @IsString()

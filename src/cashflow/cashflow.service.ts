@@ -9,7 +9,7 @@ import {
 import type { CreateCashflowImportDto } from './dto/create-cashflow-import.dto';
 import type { CreateCashflowEntryDto } from './dto/create-cashflow-entry.dto';
 import type { UpdateCashflowEntryDto } from './dto/update-cashflow-entry.dto';
-import { GeminiService } from '../gemini/gemini.service';
+import { LlmService } from '../llm/llm.service';
 
 @Injectable()
 export class CashflowService {
@@ -18,7 +18,7 @@ export class CashflowService {
   constructor(
     @InjectModel(CashflowEntry.name)
     private readonly model: Model<CashflowEntry>,
-    private readonly gemini: GeminiService,
+    private readonly llm: LlmService,
   ) {}
 
   async importBatch(
@@ -256,7 +256,7 @@ Detalhe: ${entry.detail ?? ''}
 Valor: R$ ${Math.abs(entry.amount).toFixed(2)} (${entry.amount >= 0 ? 'entrada' : 'saída'})
 Data: ${entry.date.toLocaleDateString('pt-BR')}`;
 
-    const analysis = await this.gemini.analyzeTransaction(text);
+    const analysis = await this.llm.analyzeTransaction(text);
     await this.model.findOneAndUpdate(
       { _id: id, tenantId: new Types.ObjectId(tenantId) },
       { aiAnalysis: analysis }
