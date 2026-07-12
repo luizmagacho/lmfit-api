@@ -52,6 +52,22 @@ export class Product {
   /** Peso em gramas para cálculo de frete (Correios). */
   @Prop({ type: Number })
   weightGrams?: number;
+
+  /** 'ready_made' = comprado pronto de fornecedor (custo + margem definem o preço); 'manufactured' = produzido internamente (custo vem do módulo de produção). */
+  @Prop({ type: String, enum: ['manufactured', 'ready_made'], default: 'manufactured' })
+  sourceType: 'manufactured' | 'ready_made';
+
+  /** Preço de custo — obrigatório quando sourceType = 'ready_made'. */
+  @Prop({ type: Number })
+  costPrice?: number;
+
+  /** Margem sobre o custo em %, usada para derivar `priceRetail` quando sourceType = 'ready_made'. */
+  @Prop({ type: Number })
+  markupPercent?: number;
+
+  /** Fornecedor do item pronto — obrigatório quando sourceType = 'ready_made'. */
+  @Prop({ type: Types.ObjectId, ref: 'Supplier' })
+  supplierId?: Types.ObjectId;
 }
 
 export const ProductSchema = SchemaFactory.createForClass(Product);

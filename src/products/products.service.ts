@@ -64,6 +64,59 @@ export class ProductsService {
     return Number(raw);
   }
 
+  /**
+   * For a "ready_made" product (comprado pronto de fornecedor), the sale price is never
+   * typed directly — it's always derived from cost + markup, so the two can't drift apart.
+   * Falls back to the existing document's values on a partial PATCH (e.g. only markupPercent
+   * changed). Returns `{}` for a 'manufactured' product — no cost/supplier requirement there,
+   * that costing lives in the production module instead.
+   */
+  private resolveReadyMadePricing(
+    dto: {
+      sourceType?: 'manufactured' | 'ready_made';
+      costPrice?: number;
+      markupPercent?: number;
+      supplierId?: string;
+    },
+    existing?: {
+      sourceType?: string;
+      costPrice?: number;
+      markupPercent?: number;
+      supplierId?: Types.ObjectId;
+    } | null,
+  ): { priceRetail?: number } {
+    const sourceType = dto.sourceType ?? existing?.sourceType ?? 'manufactured';
+    if (sourceType !== 'ready_made') return {};
+
+    const costPrice = dto.costPrice ?? existing?.costPrice;
+    const markupPercent = dto.markupPercent ?? existing?.markupPercent;
+    const supplierId = dto.supplierId ?? (existing?.supplierId ? String(existing.supplierId) : undefined);
+
+    if (costPrice === undefined || costPrice === null || !Number.isFinite(Number(costPrice)) || Number(costPrice) < 0) {
+      throw new UnprocessableEntityException({
+        message: 'Item pronto precisa de um preço de custo ≥ 0',
+      });
+    }
+    if (
+      markupPercent === undefined ||
+      markupPercent === null ||
+      !Number.isFinite(Number(markupPercent)) ||
+      Number(markupPercent) < 0
+    ) {
+      throw new UnprocessableEntityException({
+        message: 'Item pronto precisa de uma margem (%) ≥ 0',
+      });
+    }
+    if (!supplierId || !Types.ObjectId.isValid(supplierId)) {
+      throw new UnprocessableEntityException({
+        message: 'Item pronto precisa de um fornecedor',
+      });
+    }
+
+    const priceRetail = Math.round(Number(costPrice) * (1 + Number(markupPercent) / 100) * 100) / 100;
+    return { priceRetail };
+  }
+
   /** API: espelha quantityOnHand como quantityInStock + preços varejo/atacado. */
   private mapVariantForApi(
     v: Record<string, unknown>,
@@ -481,6 +534,9 @@ export class ProductsService {
   }
 
   async createProduct(tenantId: string, dto: CreateProductDto) {
+    const readyMade = this.resolveReadyMadePricing(dto);
+    const computedPriceRetail = readyMade.priceRetail;
+
     const doc = await this.productModel.create({
       tenantId: new Types.ObjectId(tenantId),
       name: dto.name,
@@ -488,7 +544,7 @@ export class ProductsService {
       description: dto.description,
       category: dto.category,
       active: dto.active ?? true,
-      priceRetail: dto.priceRetail,
+      priceRetail: computedPriceRetail ?? dto.priceRetail,
       priceWholesale: dto.priceWholesale,
       minWholesaleQty: dto.minWholesaleQty ?? 6,
       compareAtPrice: dto.compareAtPrice,
@@ -496,6 +552,10 @@ export class ProductsService {
       images: dto.images ?? [],
       barcode: dto.barcode,
       weightGrams: dto.weightGrams,
+      sourceType: dto.sourceType ?? 'manufactured',
+      costPrice: dto.costPrice,
+      markupPercent: dto.markupPercent,
+      supplierId: dto.supplierId ? new Types.ObjectId(dto.supplierId) : undefined,
     });
     const pid = doc._id as Types.ObjectId;
 
@@ -506,7 +566,17 @@ export class ProductsService {
             message: 'variants não pode ser um array vazio',
           });
         }
-        await this.replaceProductVariants(tenantId, pid, dto.variants);
+        // Item pronto: o preço calculado (custo + margem) vira o padrão de cada variante que
+        // não tiver preço próprio informado — mas uma variante ainda pode sobrescrever.
+        const variants =
+          computedPriceRetail !== undefined
+            ? dto.variants.map((v) =>
+                v.priceRetail === undefined && v.price === undefined
+                  ? { ...v, priceRetail: computedPriceRetail }
+                  : v,
+              )
+            : dto.variants;
+        await this.replaceProductVariants(tenantId, pid, variants);
       } else if (dto.sku?.trim()) {
         const qty = Math.floor(
           Number(
@@ -516,11 +586,13 @@ export class ProductsService {
           ),
         );
         const retail =
-          dto.priceRetail !== undefined && dto.priceRetail !== null
-            ? Number(dto.priceRetail)
-            : dto.price !== undefined && dto.price !== null
-              ? Number(dto.price)
-              : 0;
+          computedPriceRetail !== undefined
+            ? computedPriceRetail
+            : dto.priceRetail !== undefined && dto.priceRetail !== null
+              ? Number(dto.priceRetail)
+              : dto.price !== undefined && dto.price !== null
+                ? Number(dto.price)
+                : 0;
         if (retail < 0 || qty < 0) {
           throw new UnprocessableEntityException({
             message: 'price e quantityInStock devem ser ≥ 0',
@@ -585,13 +657,20 @@ export class ProductsService {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
+        .populate<{ supplierId: { _id: Types.ObjectId; name: string } | null }>('supplierId', 'name')
         .lean(),
       this.productModel.countDocuments(q).exec(),
     ]);
-    const items = await this.attachVariantsToProducts(
-      tenantId,
-      rawItems as unknown as Record<string, unknown>[],
-    );
+    const flattened = rawItems.map((p) => {
+      const o = p as unknown as Record<string, unknown>;
+      if (o.supplierId && typeof o.supplierId === 'object') {
+        const sup = o.supplierId as { _id: Types.ObjectId; name: string };
+        o.supplierName = sup.name;
+        o.supplierId = String(sup._id);
+      }
+      return o;
+    });
+    const items = await this.attachVariantsToProducts(tenantId, flattened);
     return { items, total, page, limit };
   }
 
@@ -866,9 +945,18 @@ export class ProductsService {
 
   async getProduct(tenantId: string, id: string) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
-    const p = await this.productModel.findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) }).lean().exec();
+    const p = await this.productModel
+      .findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) })
+      .populate<{ supplierId: { _id: Types.ObjectId; name: string } | null }>('supplierId', 'name')
+      .lean()
+      .exec();
     if (!p) throw new NotFoundException();
     const pObj = p as unknown as Record<string, unknown>;
+    if (pObj.supplierId && typeof pObj.supplierId === 'object') {
+      const sup = pObj.supplierId as { _id: Types.ObjectId; name: string };
+      pObj.supplierName = sup.name;
+      pObj.supplierId = String(sup._id);
+    }
     const variantsRaw = await this.variantModel
       .find({ productId: new Types.ObjectId(id), tenantId: new Types.ObjectId(tenantId) })
       .sort({ sku: 1 })
@@ -883,13 +971,40 @@ export class ProductsService {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
     const pid = new Types.ObjectId(id);
 
+    const existing = await this.productModel
+      .findOne({ _id: pid, tenantId: new Types.ObjectId(tenantId) })
+      .lean()
+      .exec();
+    if (!existing) throw new NotFoundException();
+
+    // Only recompute when the request touches a ready-made field, or the product already
+    // is one (e.g. bumping stock/description shouldn't force cost+markup to be re-sent).
+    const touchesReadyMade =
+      dto.sourceType !== undefined ||
+      dto.costPrice !== undefined ||
+      dto.markupPercent !== undefined ||
+      dto.supplierId !== undefined;
+    const readyMade =
+      touchesReadyMade || existing.sourceType === 'ready_made'
+        ? this.resolveReadyMadePricing(dto, existing as unknown as Record<string, unknown>)
+        : {};
+    const computedPriceRetail = readyMade.priceRetail;
+
     if (dto.variants !== undefined) {
       if (!dto.variants.length) {
         throw new UnprocessableEntityException({
           message: 'variants não pode ser um array vazio',
         });
       }
-      await this.replaceProductVariants(tenantId, pid, dto.variants);
+      const variants =
+        computedPriceRetail !== undefined
+          ? dto.variants.map((v) =>
+              v.priceRetail === undefined && v.price === undefined
+                ? { ...v, priceRetail: computedPriceRetail }
+                : v,
+            )
+          : dto.variants;
+      await this.replaceProductVariants(tenantId, pid, variants);
     }
 
     const patch: Record<string, unknown> = {};
@@ -906,6 +1021,15 @@ export class ProductsService {
     if (dto.images !== undefined) patch.images = dto.images;
     if (dto.barcode !== undefined) patch.barcode = dto.barcode;
     if (dto.weightGrams !== undefined) patch.weightGrams = dto.weightGrams;
+    if (dto.sourceType !== undefined) patch.sourceType = dto.sourceType;
+    if (dto.costPrice !== undefined) patch.costPrice = dto.costPrice;
+    if (dto.markupPercent !== undefined) patch.markupPercent = dto.markupPercent;
+    if (dto.supplierId !== undefined) {
+      patch.supplierId = dto.supplierId ? new Types.ObjectId(dto.supplierId) : undefined;
+    }
+    // Authoritative: computed price always wins over any client-sent priceRetail for a
+    // ready-made item, so the two can never drift apart.
+    if (computedPriceRetail !== undefined) patch.priceRetail = computedPriceRetail;
 
     if (Object.keys(patch).length > 0) {
       const doc = await this.productModel

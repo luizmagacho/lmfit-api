@@ -7,6 +7,7 @@ import { PurchasesService } from './purchases.service';
 import { ProductVariant, ProductVariantSchema } from '../products/schemas/product-variant.schema';
 import { Material, MaterialSchema } from '../materials/schemas/material.schema';
 import { LocationsModule } from '../locations/locations.module';
+import { ProductsModule } from '../products/products.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { LocationsModule } from '../locations/locations.module';
       { name: Material.name, schema: MaterialSchema },
     ]),
     LocationsModule,
+    ProductsModule,
   ],
   controllers: [PurchasesController],
   providers: [PurchasesService],

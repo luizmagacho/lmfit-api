@@ -19,6 +19,8 @@ import { Purchase } from './schemas/purchase.schema';
 import { ProductVariant } from '../products/schemas/product-variant.schema';
 import { Material } from '../materials/schemas/material.schema';
 import { LocationsService } from '../locations/locations.service';
+import { ProductsService } from '../products/products.service';
+import { escapeRegex } from '../common/utils/text-search.util';
 
 @Injectable()
 export class PurchasesService {
@@ -28,10 +30,39 @@ export class PurchasesService {
     @InjectModel(Material.name) private readonly materialModel: Model<Material>,
     private readonly excel: ExcelSpreadsheetService,
     private readonly locations: LocationsService,
+    private readonly products: ProductsService,
   ) {}
 
+  /**
+   * A linha pode trazer `newVariant` em vez de `variantId` quando o fornecedor está
+   * entregando uma cor/tamanho que a loja ainda não tinha cadastrado — cria a
+   * ProductVariant agora e resolve a linha para o `variantId` resultante, pra que o
+   * fluxo normal de recebimento (adjustStock) credite o estoque dela como qualquer outra.
+   */
+  private async resolveNewVariants(
+    tenantId: string,
+    lines: PurchaseLineInputDto[],
+  ): Promise<PurchaseLineInputDto[]> {
+    const resolved: PurchaseLineInputDto[] = [];
+    for (const l of lines) {
+      if (!l.variantId && l.newVariant) {
+        const variant = await this.products.createVariant(tenantId, l.newVariant.productId, {
+          sku: l.newVariant.sku,
+          color: l.newVariant.color,
+          size: l.newVariant.size,
+          price: l.newVariant.price,
+        });
+        resolved.push({ ...l, variantId: String(variant._id), newVariant: undefined });
+      } else {
+        resolved.push(l);
+      }
+    }
+    return resolved;
+  }
+
   async create(tenantId: string, dto: CreatePurchaseDto, createdBy?: string) {
-    const lines = this.normalizePurchaseLines(dto.lines);
+    const resolvedLines = await this.resolveNewVariants(tenantId, dto.lines ?? []);
+    const lines = this.normalizePurchaseLines(resolvedLines);
     const doc = await this.model.create({
       tenantId: new Types.ObjectId(tenantId),
       supplierId: new Types.ObjectId(dto.supplierId),
@@ -99,11 +130,13 @@ export class PurchasesService {
   private listFilter(tenantId: string, search?: string) {
     return {
       tenantId: new Types.ObjectId(tenantId),
+      // Escape user input before building the regex — same ReDoS class already fixed for
+      // products/customers/orders search.
       ...(search
         ? {
             $or: [
-              { reference: new RegExp(search, 'i') },
-              { notes: new RegExp(search, 'i') },
+              { reference: new RegExp(escapeRegex(search), 'i') },
+              { notes: new RegExp(escapeRegex(search), 'i') },
             ],
           }
         : {}),
@@ -339,10 +372,17 @@ export class PurchasesService {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
     const doc = await this.model
       .findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) })
+      .populate<{ supplierId: { _id: Types.ObjectId; name: string } | null }>('supplierId', 'name')
       .lean()
       .exec();
     if (!doc) throw new NotFoundException();
-    return doc;
+    const o = doc as unknown as Record<string, unknown>;
+    if (o.supplierId && typeof o.supplierId === 'object') {
+      const sup = o.supplierId as { _id: Types.ObjectId; name: string };
+      o.supplierName = sup.name;
+      o.supplierId = String(sup._id);
+    }
+    return o;
   }
 
   
@@ -374,7 +414,8 @@ export class PurchasesService {
     if (dto.total !== undefined) payload.total = dto.total;
     if (dto.notes !== undefined) payload.notes = dto.notes;
     if (dto.lines !== undefined) {
-      payload.lines = this.normalizePurchaseLines(dto.lines);
+      const resolvedLines = await this.resolveNewVariants(tenantId, dto.lines);
+      payload.lines = this.normalizePurchaseLines(resolvedLines);
     }
     const oldDoc = await this.model.findOne(scoped).lean().exec();
     if (!oldDoc) throw new NotFoundException();

@@ -3,6 +3,8 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
+  IsEnum,
+  IsMongoId,
   IsNumber,
   IsOptional,
   IsString,
@@ -129,4 +131,34 @@ export class CreateProductDto {
   @ValidateNested({ each: true })
   @Type(() => ProductVariantUpsertDto)
   variants?: ProductVariantUpsertDto[];
+
+  @ApiPropertyOptional({
+    enum: ['manufactured', 'ready_made'],
+    default: 'manufactured',
+    description:
+      '"ready_made" = item pronto comprado de fornecedor: exige supplierId + costPrice + markupPercent, e o preço de venda é calculado no servidor a partir deles.',
+  })
+  @IsOptional()
+  @IsEnum(['manufactured', 'ready_made'])
+  sourceType?: 'manufactured' | 'ready_made';
+
+  @ApiPropertyOptional({ description: 'Preço de custo (obrigatório quando sourceType = ready_made).' })
+  @IsOptional()
+  @BrlMoney()
+  @IsNumber()
+  @Min(0)
+  costPrice?: number;
+
+  @ApiPropertyOptional({
+    description: 'Margem desejada sobre o custo, em % (ex.: 50 = venda por 1,5x o custo).',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  markupPercent?: number;
+
+  @ApiPropertyOptional({ description: 'Fornecedor do item pronto (obrigatório quando sourceType = ready_made).' })
+  @IsOptional()
+  @IsMongoId()
+  supplierId?: string;
 }

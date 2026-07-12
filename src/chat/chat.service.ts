@@ -17,6 +17,8 @@ Responda SEMPRE com um JSON válido (sem markdown, sem texto fora do JSON) neste
 Regras para "reply":
 - Português do Brasil, breve, simpática e objetiva (no máximo 3-4 frases).
 - Use SOMENTE os produtos listados em "Catálogo disponível" abaixo para preço/estoque/variação. Nunca invente preço, variação ou estoque que não estejam na lista.
+- Quando o cliente perguntar a diferença entre dois ou mais produtos parecidos (ex.: dois conjuntos, dois modelos da mesma categoria), leia e compare a "descrição" de cada um — é lá que ficam os detalhes que não aparecem no nome, como um conjunto vir com short e outro vir com calça, tecido diferente, etc. Nunca diga que são iguais ou que não sabe a diferença se as descrições listam detalhes distintos.
+- Se um produto não tiver "descrição" cadastrada, diga que não tem esse detalhe específico à mão em vez de inventar uma diferença.
 - O preço de atacado só é válido a partir da quantidade mínima indicada para cada produto.
 - Se um item estiver marcado como "esgotado, aceita encomenda", você pode oferecer a encomenda ao cliente — deixe claro que é sob encomenda (prazo de entrega maior, não é entrega imediata).
 - Se um item estiver marcado só como "esgotado" (sem aceitar encomenda), avise que não há previsão de reposição.
@@ -51,6 +53,16 @@ function tokenize(text: string): string[] {
     .replace(/\p{M}/gu, '')
     .split(/[^a-z0-9]+/)
     .filter((t) => t.length >= 3);
+}
+
+/** Naive PT-BR singular/plural tolerance (conjuntos↔conjunto, calças↔calça) so a plural
+ * question still matches a singular catalog name/category/description word — plain
+ * substring matching alone misses this and can leave the relevant products out of context. */
+function matchesToken(haystack: string, token: string): boolean {
+  if (haystack.includes(token)) return true;
+  if (token.length > 3 && token.endsWith('es')) return haystack.includes(token.slice(0, -2));
+  if (token.length > 3 && token.endsWith('s')) return haystack.includes(token.slice(0, -1));
+  return false;
 }
 
 function variantStock(v: Record<string, unknown>): number {
@@ -122,8 +134,8 @@ export class ChatService {
     if (!tokens.length) return products.slice(0, MAX_CONTEXT_PRODUCTS);
 
     const scored = products.map((p) => {
-      const haystack = `${String(p.name ?? '')} ${String(p.category ?? '')}`.toLowerCase();
-      const score = tokens.reduce((acc, t) => (haystack.includes(t) ? acc + 1 : acc), 0);
+      const haystack = `${String(p.name ?? '')} ${String(p.category ?? '')} ${String(p.description ?? '')}`.toLowerCase();
+      const score = tokens.reduce((acc, t) => (matchesToken(haystack, t) ? acc + 1 : acc), 0);
       return { p, score };
     });
     const matched = scored.filter((s) => s.score > 0).sort((a, b) => b.score - a.score);
@@ -156,7 +168,9 @@ export class ChatService {
             return `  • variantId=${String(v._id)} | ${label} | ${vStatus}`;
           })
           .join('\n');
-        return `- ${p.name} (${p.category ?? 'sem categoria'}) — varejo ${retail}, atacado ${wholesale} a partir de ${minQty} un — ${stock} — link: /catalogo/p/${slug}\n${variantLines}`;
+        const description = String(p.description ?? '').trim();
+        const descriptionLine = description ? `\n  descrição: ${description}` : '';
+        return `- ${p.name} (${p.category ?? 'sem categoria'}) — varejo ${retail}, atacado ${wholesale} a partir de ${minQty} un — ${stock} — link: /catalogo/p/${slug}${descriptionLine}\n${variantLines}`;
       })
       .join('\n');
   }
