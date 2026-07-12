@@ -524,6 +524,33 @@ export class ProductsService {
     }
   }
 
+  /**
+   * Usado pelo fluxo de compras: quando o fornecedor traz uma peça cujo produto ainda
+   * não existe, cria-o (nome + slug único) em vez de exigir que o operador cadastre o
+   * produto separadamente antes de lançar a compra. Reaproveita um produto já existente
+   * com o mesmo nome (case-insensitive) em vez de duplicar.
+   */
+  async findOrCreateProductByName(tenantId: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      throw new UnprocessableEntityException({ message: 'Nome do produto não pode ser vazio' });
+    }
+    const tid = new Types.ObjectId(tenantId);
+    const existing = await this.productModel
+      .findOne({ tenantId: tid, name: { $regex: `^${escapeRegex(trimmed)}$`, $options: 'i' } })
+      .exec();
+    if (existing) return existing;
+
+    const baseSlug = slugifyFromName(trimmed);
+    let slug = baseSlug;
+    let suffix = 1;
+    while (await this.productModel.exists({ tenantId: tid, slug })) {
+      suffix += 1;
+      slug = `${baseSlug}-${suffix}`;
+    }
+    return this.productModel.create({ tenantId: tid, name: trimmed, slug, active: true });
+  }
+
   private async rollbackNewProduct(tenantId: string, pid: Types.ObjectId) {
     const vs = await this.variantModel.find({ tenantId: new Types.ObjectId(tenantId), productId: pid }).select('_id').lean().exec();
     for (const v of vs) {

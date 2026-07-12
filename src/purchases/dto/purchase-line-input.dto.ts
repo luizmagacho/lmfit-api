@@ -8,9 +8,19 @@ import { IsMongoId, IsNumber, IsOptional, IsString, Min, MinLength, ValidateNest
  * tamanho que a loja ainda não tinha cadastrado.
  */
 export class PurchaseNewVariantDto {
-  @ApiProperty({ description: 'Produto já cadastrado ao qual esta variação pertence.' })
+  @ApiPropertyOptional({ description: 'Produto já cadastrado ao qual esta variação pertence.' })
+  @IsOptional()
   @IsMongoId()
-  productId: string;
+  productId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Nome de um produto que ainda não existe — usado no lugar de productId; o produto é criado junto com a variação (uma vez só, mesmo que várias linhas da mesma compra usem o mesmo nome).',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  newProductName?: string;
 
   @ApiProperty()
   @IsString()

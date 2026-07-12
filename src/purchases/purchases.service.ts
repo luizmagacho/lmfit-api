@@ -44,9 +44,25 @@ export class PurchasesService {
     lines: PurchaseLineInputDto[],
   ): Promise<PurchaseLineInputDto[]> {
     const resolved: PurchaseLineInputDto[] = [];
+    // Several lines in the same purchase can share `newProductName` (e.g. "Conjunto Novo"
+    // in Preto/G, Preto/GG, Preto/P) — create that product once and reuse it across all
+    // of them instead of creating a duplicate product per line.
+    const productIdByName = new Map<string, string>();
     for (const l of lines) {
       if (!l.variantId && l.newVariant) {
-        const variant = await this.products.createVariant(tenantId, l.newVariant.productId, {
+        let productId = l.newVariant.productId;
+        if (!productId && l.newVariant.newProductName) {
+          const key = l.newVariant.newProductName.trim().toLowerCase();
+          if (!productIdByName.has(key)) {
+            const product = await this.products.findOrCreateProductByName(tenantId, l.newVariant.newProductName);
+            productIdByName.set(key, String(product._id));
+          }
+          productId = productIdByName.get(key);
+        }
+        if (!productId) {
+          throw new BadRequestException('newVariant precisa de productId ou newProductName');
+        }
+        const variant = await this.products.createVariant(tenantId, productId, {
           sku: l.newVariant.sku,
           color: l.newVariant.color,
           size: l.newVariant.size,

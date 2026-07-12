@@ -26,7 +26,7 @@ describe('PurchasesService — new-variant lines feed the normal stock-credit pa
   const variantModel: any = { updateOne: jest.fn() };
   const materialModel: any = { updateOne: jest.fn() };
   const locations = { adjust: jest.fn() };
-  const products = { createVariant: jest.fn() };
+  const products = { createVariant: jest.fn(), findOrCreateProductByName: jest.fn() };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -97,6 +97,32 @@ describe('PurchasesService — new-variant lines feed the normal stock-credit pa
       { $inc: { quantityOnHand: 10 } },
     );
     expect(locations.adjust).toHaveBeenCalledWith(tenantId, newVariantId, 10);
+  });
+
+  // Regression: the "gerar N linhas" bulk color/size UI sends one purchase line per
+  // combination, all sharing the same newProductName ("Conjunto Novo") when the product
+  // doesn't exist yet — each line must attach to the SAME newly-created product, not spawn
+  // a duplicate product per line.
+  it('creates a brand-new product only once when multiple lines share newProductName', async () => {
+    const newProductId = new Types.ObjectId().toString();
+    products.findOrCreateProductByName.mockResolvedValue({ _id: newProductId });
+    products.createVariant.mockResolvedValue({ _id: new Types.ObjectId() });
+    purchaseModel.create.mockResolvedValue({ status: 'pending', lines: [] });
+
+    await service.create(tenantId, {
+      supplierId,
+      lines: [
+        { newVariant: { newProductName: 'Conjunto Novo', sku: 'CN-PT-G', color: 'Preto', size: 'G' }, quantityOrdered: 5 },
+        { newVariant: { newProductName: 'Conjunto Novo', sku: 'CN-PT-GG', color: 'Preto', size: 'GG' }, quantityOrdered: 3 },
+        { newVariant: { newProductName: '  conjunto novo  ', sku: 'CN-PT-P', color: 'Preto', size: 'P' }, quantityOrdered: 2 },
+      ] as any,
+    } as any);
+
+    expect(products.findOrCreateProductByName).toHaveBeenCalledTimes(1);
+    expect(products.createVariant).toHaveBeenCalledTimes(3);
+    for (const call of products.createVariant.mock.calls) {
+      expect(call[1]).toBe(newProductId);
+    }
   });
 });
 
