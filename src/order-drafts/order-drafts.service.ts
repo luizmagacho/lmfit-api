@@ -88,15 +88,24 @@ export class OrderDraftsService {
     allowBackorder: boolean,
   ): Promise<{ lines: OrderDraft['lines']; usesWholesale: boolean }> {
     if (!lines?.length) return { lines: [], usesWholesale: false };
-    const built: OrderDraft['lines'] = [];
-    let usesWholesale = false;
     for (const line of lines) {
       if (!Types.ObjectId.isValid(line.variantId)) {
         throw new BadRequestException('Invalid variant');
       }
-      const v = await this.variantModel
-        .findOne({ _id: line.variantId, tenantId: new Types.ObjectId(tenantId) })
-        .exec();
+    }
+    // Batch both lookups (variants + their wholesale pricing) instead of two round-trips
+    // per line — a cart of 20 items previously meant ~40 sequential queries here.
+    const variantIds = lines.map((l) => l.variantId);
+    const variants = await this.variantModel
+      .find({ _id: { $in: variantIds }, tenantId: new Types.ObjectId(tenantId) })
+      .exec();
+    const variantById = new Map(variants.map((v) => [String(v._id), v]));
+    const pricingByVariant = await this.products.getWholesalePricingBatch(tenantId, variantIds);
+
+    const built: OrderDraft['lines'] = [];
+    let usesWholesale = false;
+    for (const line of lines) {
+      const v = variantById.get(line.variantId);
       if (!v) throw new BadRequestException('Variant not found');
       // Public checkout blocks selling past on-hand stock, unless the variant is
       // explicitly marked as accepting backorder AND the tenant's plan allows it
@@ -121,7 +130,7 @@ export class OrderDraftsService {
       }
       // Price is always computed server-side from quantity + the product's own
       // wholesale rule — never trust a client-sent unit price (price manipulation risk).
-      const pricing = await this.products.getWholesalePricing(tenantId, String(v._id));
+      const pricing = pricingByVariant.get(String(v._id));
       const isWholesaleLine = !!(pricing && line.quantity >= pricing.minWholesaleQty);
       if (isWholesaleLine) usesWholesale = true;
       const unitPrice = isWholesaleLine ? pricing!.priceWholesale : (pricing?.priceRetail ?? v.price ?? 0);
@@ -137,11 +146,15 @@ export class OrderDraftsService {
 
   /** Cupom é mutuamente exclusivo com preço de atacado nesta v1 — evita empilhar dois descontos. */
   private async cartUsesWholesale(tenantId: string, lines: OrderDraft['lines']): Promise<boolean> {
-    for (const l of lines) {
-      const pricing = await this.products.getWholesalePricing(tenantId, String(l.variantId));
-      if (pricing && l.quantity >= pricing.minWholesaleQty) return true;
-    }
-    return false;
+    if (!lines.length) return false;
+    const pricingByVariant = await this.products.getWholesalePricingBatch(
+      tenantId,
+      lines.map((l) => String(l.variantId)),
+    );
+    return lines.some((l) => {
+      const pricing = pricingByVariant.get(String(l.variantId));
+      return !!(pricing && l.quantity >= pricing.minWholesaleQty);
+    });
   }
 
   private async applyDraftPatch(

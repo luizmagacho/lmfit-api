@@ -35,12 +35,16 @@ export class LocationsService {
   }
 
   async create(tenantId: string, dto: CreateLocationDto) {
+    const tid = new Types.ObjectId(tenantId);
     try {
+      if (dto.isDefault) {
+        await this.model.updateMany({ tenantId: tid, isDefault: true }, { $set: { isDefault: false } });
+      }
       return await this.model.create({
-        tenantId: new Types.ObjectId(tenantId),
+        tenantId: tid,
         name: dto.name.trim(),
         address: dto.address?.trim(),
-        isDefault: false,
+        isDefault: !!dto.isDefault,
         active: true,
       });
     } catch (e: any) {
@@ -72,13 +76,18 @@ export class LocationsService {
 
   async update(tenantId: string, id: string, dto: UpdateLocationDto) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
+    const tid = new Types.ObjectId(tenantId);
     const patch: Record<string, unknown> = {};
     if (dto.name !== undefined) patch.name = dto.name.trim();
     if (dto.address !== undefined) patch.address = dto.address?.trim();
     if (dto.active !== undefined) patch.active = dto.active;
-    const doc = await this.model
-      .findOneAndUpdate({ _id: id, tenantId: new Types.ObjectId(tenantId) }, patch, { new: true })
-      .exec();
+    if (dto.isDefault !== undefined) {
+      if (dto.isDefault) {
+        await this.model.updateMany({ tenantId: tid, isDefault: true, _id: { $ne: id } }, { $set: { isDefault: false } });
+      }
+      patch.isDefault = dto.isDefault;
+    }
+    const doc = await this.model.findOneAndUpdate({ _id: id, tenantId: tid }, patch, { new: true }).exec();
     if (!doc) throw new NotFoundException();
     return doc;
   }

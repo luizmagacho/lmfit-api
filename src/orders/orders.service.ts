@@ -24,6 +24,7 @@ import { Order } from './schemas/order.schema';
 import { ORDER_CHANNELS } from './types/order-channel';
 import type { OrderWarning } from './types/order-warning';
 import { PaymentsService } from '../payments/payments.service';
+import { escapeRegex } from '../common/utils/text-search.util';
 
 const STOCK_APPLIED_STATUSES = ['shipped', 'completed'] as const;
 
@@ -93,20 +94,38 @@ export class OrdersService {
     if (!inputs?.length) {
       return { lines: [], total: 0 };
     }
-    const lines: Order['lines'] = [];
-    let sum = 0;
     for (const line of inputs) {
       if (!Types.ObjectId.isValid(line.variantId)) {
         throw new BadRequestException(`Variante inválida ${line.variantId}`);
       }
-      const v = await this.variantModel.findOne({
-        _id: line.variantId,
-        tenantId: new Types.ObjectId(tenantId),
-      }).exec();
+    }
+    // Batch both lookups instead of two round-trips per line.
+    const variantIds = inputs.map((l) => l.variantId);
+    const variants = await this.variantModel
+      .find({ _id: { $in: variantIds }, tenantId: new Types.ObjectId(tenantId) })
+      .exec();
+    const variantById = new Map(variants.map((v) => [String(v._id), v]));
+    const pricingByVariant = await this.products.getWholesalePricingBatch(tenantId, variantIds);
+
+    const lines: Order['lines'] = [];
+    let sum = 0;
+    for (const line of inputs) {
+      const v = variantById.get(line.variantId);
       if (!v) {
         throw new BadRequestException(`Variante não encontrada ${line.variantId}`);
       }
       const unitPrice = line.unitPrice;
+      // Staff/PDV can type a custom unitPrice (manual discounts are legitimate), but if
+      // that price sits at or below the variant's wholesale rate, the minimum wholesale
+      // quantity must still be honored — otherwise atacado pricing could be granted to a
+      // varejo-sized purchase just by typing the lower number. Mirrors the server-side
+      // enforcement already done for the public checkout in order-drafts.service.ts.
+      const pricing = pricingByVariant.get(line.variantId);
+      if (pricing && unitPrice <= pricing.priceWholesale && line.quantity < pricing.minWholesaleQty) {
+        throw new BadRequestException(
+          `Preço de atacado para ${v.sku} exige quantidade mínima de ${pricing.minWholesaleQty} (solicitado ${line.quantity}).`,
+        );
+      }
       sum += unitPrice * line.quantity;
       lines.push({
         variantId: new Types.ObjectId(line.variantId),
@@ -310,9 +329,14 @@ export class OrdersService {
   private listFilter(tenantId: string, search?: string, channel?: string) {
     const parts: Record<string, unknown>[] = [{ tenantId: new Types.ObjectId(tenantId) }];
     if (search) {
+      // Escape user input before building the regex — an unescaped search string lets a
+      // client submit regex metacharacters (e.g. nested quantifiers) that make MongoDB's
+      // regex engine hang on evaluation (ReDoS), the same class of bug already fixed for
+      // products/customers search via `escapeRegex`.
+      const safe = escapeRegex(search);
       const or: Record<string, unknown>[] = [
-        { reference: new RegExp(search, 'i') },
-        { notes: new RegExp(search, 'i') },
+        { reference: new RegExp(safe, 'i') },
+        { notes: new RegExp(safe, 'i') },
       ];
       const asNumber = Number(search);
       if (Number.isInteger(asNumber)) or.push({ number: asNumber });

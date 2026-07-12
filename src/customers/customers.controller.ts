@@ -26,6 +26,7 @@ import { ImportJsonDto } from '../common/dto/import-json.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { TenantId } from '../common/decorators/tenant-id.decorator';
 import type { JwtUserPayload } from '../auth/jwt-user.payload';
+import { Audited } from '../audit/audited.decorator';
 import { CustomersService } from './customers.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
@@ -38,6 +39,7 @@ import { UpdateCustomerDto } from './dto/update-customer.dto';
 export class CustomersController {
   constructor(private readonly customers: CustomersService) {}
 
+  @Audited('customers.create')
   @Post()
   create(
     @Body() dto: CreateCustomerDto,
@@ -78,6 +80,7 @@ export class CustomersController {
     });
   }
 
+  @Audited('customers.import')
   @Post('import')
   @ApiConsumes('multipart/form-data', 'application/json')
   @UseInterceptors(
@@ -134,6 +137,7 @@ export class CustomersController {
     return this.customers.findOne(tenantId, id);
   }
 
+  @Audited('customers.update')
   @Patch(':id')
   update(
     @Param('id') id: string,
@@ -143,6 +147,7 @@ export class CustomersController {
     return this.customers.update(tenantId, id, dto);
   }
 
+  @Audited('customers.remove')
   @Delete(':id')
   remove(
     @Param('id') id: string,

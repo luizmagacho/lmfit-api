@@ -114,10 +114,26 @@ export class ReturnsService {
   async findAll(tenantId: string, page: number, limit: number) {
     const skip = skipFromPage(page, limit);
     const filter = { tenantId: new Types.ObjectId(tenantId) };
-    const [items, total] = await Promise.all([
-      this.model.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean().exec(),
+    const [rows, total] = await Promise.all([
+      this.model
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate<{ orderId: { _id: Types.ObjectId; number: number; reference?: string } }>('orderId', 'number reference')
+        .populate<{ customerId: { _id: Types.ObjectId; name: string } }>('customerId', 'name')
+        .lean()
+        .exec(),
       this.model.countDocuments(filter).exec(),
     ]);
+    const items = rows.map((r) => ({
+      ...r,
+      orderNumber: r.orderId?.number,
+      orderReference: r.orderId?.reference,
+      customerName: r.customerId?.name,
+      orderId: r.orderId?._id ?? r.orderId,
+      customerId: r.customerId?._id ?? r.customerId,
+    }));
     return { items, total, page, limit };
   }
 }

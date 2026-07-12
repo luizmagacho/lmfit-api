@@ -32,6 +32,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductsService } from './products.service';
 import { productImageUploadOptions } from './upload.config';
 import { TenantId } from '../common/decorators/tenant-id.decorator';
+import { Audited } from '../audit/audited.decorator';
 
 @ApiTags('products')
 @ApiBearerAuth()
@@ -41,6 +42,7 @@ import { TenantId } from '../common/decorators/tenant-id.decorator';
 export class ProductsController {
   constructor(private readonly products: ProductsService) {}
 
+  @Audited('products.create')
   @Post()
   create(
     @Body() dto: CreateProductDto,
@@ -108,6 +110,7 @@ export class ProductsController {
     });
   }
 
+  @Audited('products.import')
   @Post('import')
   @ApiConsumes('multipart/form-data', 'application/json')
   @UseInterceptors(
@@ -140,6 +143,7 @@ export class ProductsController {
     });
   }
 
+  @Audited('products.bulkPatch')
   @Patch('bulk')
   bulkPatch(
     @Body() dto: ProductsBulkPatchDto,
@@ -165,6 +169,7 @@ export class ProductsController {
     return this.products.getProduct(tenantId, id);
   }
 
+  @Audited('products.update')
   @Patch(':id')
   update(
     @Param('id') id: string,
@@ -174,6 +179,7 @@ export class ProductsController {
     return this.products.updateProduct(tenantId, id, dto);
   }
 
+  @Audited('products.remove')
   @Delete(':id')
   remove(
     @Param('id') id: string,
@@ -182,6 +188,7 @@ export class ProductsController {
     return this.products.removeProduct(tenantId, id);
   }
 
+  @Audited('products.createVariant')
   @Post(':productId/variants')
   createVariant(
     @Param('productId') productId: string,

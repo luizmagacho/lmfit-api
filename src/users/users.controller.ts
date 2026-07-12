@@ -26,6 +26,7 @@ import { ImportJsonDto } from '../common/dto/import-json.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { TenantId } from '../common/decorators/tenant-id.decorator';
 import type { JwtUserPayload } from '../auth/jwt-user.payload';
+import { Audited } from '../audit/audited.decorator';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
@@ -72,6 +73,7 @@ export class UsersController {
   }
 
   @Roles('admin')
+  @Audited('users.import')
   @Post('import')
   @ApiConsumes('multipart/form-data', 'application/json')
   @UseInterceptors(
@@ -106,6 +108,7 @@ export class UsersController {
   }
 
   @Roles('admin')
+  @Audited('users.create')
   @Post()
   create(
     @Body() dto: CreateUserDto,
@@ -131,6 +134,7 @@ export class UsersController {
   }
 
   @Roles('admin')
+  @Audited('users.update')
   @Patch(':id')
   update(
     @Param('id') id: string,
@@ -141,6 +145,7 @@ export class UsersController {
   }
 
   @Roles('admin')
+  @Audited('users.remove')
   @Delete(':id')
   remove(@Param('id') id: string, @TenantId() tenantId: string) {
     return this.users.remove(tenantId, id);

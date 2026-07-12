@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class CreateLocationDto {
   @ApiProperty()
@@ -11,4 +11,10 @@ export class CreateLocationDto {
   @IsOptional()
   @IsString()
   address?: string;
+
+  /** When true, this location becomes the tenant's default (and unsets the previous one). */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isDefault?: boolean;
 }

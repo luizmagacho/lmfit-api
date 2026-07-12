@@ -149,6 +149,53 @@ export class ProductsService {
     return { priceRetail, priceWholesale, minWholesaleQty };
   }
 
+  /**
+   * Same pricing rule as `getWholesalePricing`, batched for a cart of variants — two
+   * queries total instead of two per line (avoids N+1 when pricing checkout/order lines).
+   */
+  async getWholesalePricingBatch(
+    tenantId: string,
+    variantIds: string[],
+  ): Promise<Map<string, { priceRetail: number; priceWholesale: number; minWholesaleQty: number }>> {
+    const out = new Map<string, { priceRetail: number; priceWholesale: number; minWholesaleQty: number }>();
+    const ids = [...new Set(variantIds)].filter((id) => Types.ObjectId.isValid(id));
+    if (!ids.length) return out;
+    const tid = new Types.ObjectId(tenantId);
+    const variants = await this.variantModel
+      .find({ _id: { $in: ids.map((id) => new Types.ObjectId(id)) }, tenantId: tid })
+      .lean()
+      .exec();
+    const productIds = [...new Set(variants.map((v) => String(v.productId)))];
+    const products = await this.productModel
+      .find({ _id: { $in: productIds.map((id) => new Types.ObjectId(id)) }, tenantId: tid })
+      .lean()
+      .exec();
+    const productById = new Map(products.map((p) => [String(p._id), p]));
+
+    for (const v of variants) {
+      const product = productById.get(String(v.productId));
+      const priceRetail = Number(v.price ?? 0);
+      const vWholesale = v.priceWholesale;
+      const pWholesale = product?.priceWholesale;
+      const priceWholesale =
+        vWholesale !== undefined && vWholesale !== null
+          ? Number(vWholesale)
+          : pWholesale !== undefined && pWholesale !== null
+            ? Number(pWholesale)
+            : priceRetail;
+      const minV = v.minWholesaleQty;
+      const minP = product?.minWholesaleQty;
+      const minWholesaleQty =
+        typeof minV === 'number' && !Number.isNaN(minV)
+          ? minV
+          : typeof minP === 'number' && !Number.isNaN(minP)
+            ? minP
+            : 6;
+      out.set(String(v._id), { priceRetail, priceWholesale, minWholesaleQty });
+    }
+    return out;
+  }
+
   private enrichProductPricing(
     p: Record<string, unknown>,
     variantApis: Record<string, unknown>[],

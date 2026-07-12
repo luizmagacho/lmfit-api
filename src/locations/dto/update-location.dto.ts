@@ -17,4 +17,10 @@ export class UpdateLocationDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  /** When true, this location becomes the tenant's default (and unsets the previous one). */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isDefault?: boolean;
 }

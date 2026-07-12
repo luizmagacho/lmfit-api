@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { TenantId } from '../common/decorators/tenant-id.decorator';
+import { Audited } from '../audit/audited.decorator';
 import { IntegrationsService } from './integrations.service';
 import { SyncEngineService } from './sync-engine.service';
 import { ProductMappingService } from './product-mapping.service';
@@ -27,12 +28,14 @@ export class IntegrationsController {
     return this.integrationsService.findAll(tenantId);
   }
 
+  @Audited('integrations.create')
   @Post()
   create(@TenantId() tenantId: string, @Body() dto: CreateIntegrationDto) {
     return this.integrationsService.create(tenantId, dto);
   }
 
   /** Fluxo dedicado: troca o auth_code da autorização TikTok Shop e já cria a integração. */
+  @Audited('integrations.connectTiktok')
   @Post('tiktok/connect')
   connectTiktok(@TenantId() tenantId: string, @Body() dto: ConnectTiktokDto) {
     return this.integrationsService.connectTiktok(tenantId, dto);
@@ -43,11 +46,13 @@ export class IntegrationsController {
     return this.integrationsService.findOne(tenantId, id);
   }
 
+  @Audited('integrations.update')
   @Patch(':id')
   update(@TenantId() tenantId: string, @Param('id') id: string, @Body() dto: UpdateIntegrationDto) {
     return this.integrationsService.update(tenantId, id, dto);
   }
 
+  @Audited('integrations.remove')
   @Delete(':id')
   async remove(@TenantId() tenantId: string, @Param('id') id: string) {
     await this.mappingService.removeByIntegration(id);
@@ -55,11 +60,13 @@ export class IntegrationsController {
     return { deleted: true };
   }
 
+  @Audited('integrations.testConnection')
   @Post(':id/test')
   testConnection(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.integrationsService.testConnection(tenantId, id);
   }
 
+  @Audited('integrations.sync')
   @Post(':id/sync')
   sync(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.syncEngine.fullSync(tenantId, id);

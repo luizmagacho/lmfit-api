@@ -18,6 +18,7 @@ import { TransferStockDto } from './dto/transfer-stock.dto';
 export class LocationsController {
   constructor(private readonly locations: LocationsService) {}
 
+  @Audited('locations.create')
   @Post()
   create(@TenantId() tenantId: string, @Body() dto: CreateLocationDto) {
     return this.locations.create(tenantId, dto);
@@ -44,11 +45,13 @@ export class LocationsController {
     return this.locations.findOne(tenantId, id);
   }
 
+  @Audited('locations.update')
   @Patch(':id')
   update(@TenantId() tenantId: string, @Param('id') id: string, @Body() dto: UpdateLocationDto) {
     return this.locations.update(tenantId, id, dto);
   }
 
+  @Audited('locations.remove')
   @Delete(':id')
   remove(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.locations.remove(tenantId, id);

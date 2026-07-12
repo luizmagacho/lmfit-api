@@ -23,6 +23,7 @@ import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { TenantsService } from './tenants.service';
 
 import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
+import { Audited } from '../audit/audited.decorator';
 
 /* ------------------------------------------------------------------ */
 /*  Protected routes (admin only)                                     */
@@ -37,6 +38,7 @@ import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-ch
 export class TenantsController {
   constructor(private readonly tenants: TenantsService) {}
 
+  @Audited('tenants.create')
   @Post()
   create(@Body() dto: CreateTenantDto) {
     return this.tenants.create(dto);
@@ -52,26 +54,31 @@ export class TenantsController {
     return this.tenants.findById(id);
   }
 
+  @Audited('tenants.update')
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateTenantDto) {
     return this.tenants.update(id, dto);
   }
 
+  @Audited('tenants.updateBranding')
   @Patch(':id/branding')
   updateBranding(@Param('id') id: string, @Body() dto: UpdateBrandingDto) {
     return this.tenants.updateBranding(id, dto);
   }
 
+  @Audited('tenants.updateFiscalConfig')
   @Patch(':id/fiscal')
   updateFiscalConfig(@Param('id') id: string, @Body() dto: UpdateFiscalConfigDto) {
     return this.tenants.updateFiscalConfig(id, dto);
   }
 
+  @Audited('tenants.updateLoyaltyConfig')
   @Patch(':id/loyalty')
   updateLoyaltyConfig(@Param('id') id: string, @Body() dto: UpdateLoyaltyConfigDto) {
     return this.tenants.updateLoyaltyConfig(id, dto);
   }
 
+  @Audited('tenants.softDelete')
   @Delete(':id')
   async softDelete(@Param('id') id: string) {
     await this.tenants.update(id, { active: false });
