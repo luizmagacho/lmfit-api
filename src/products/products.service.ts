@@ -571,7 +571,7 @@ export class ProductsService {
       description: dto.description,
       category: dto.category,
       active: dto.active ?? true,
-      priceRetail: computedPriceRetail ?? dto.priceRetail,
+      priceRetail: computedPriceRetail ?? dto.priceRetail ?? dto.price,
       priceWholesale: dto.priceWholesale,
       minWholesaleQty: dto.minWholesaleQty ?? 6,
       compareAtPrice: dto.compareAtPrice,
@@ -1040,7 +1040,11 @@ export class ProductsService {
     if (dto.description !== undefined) patch.description = dto.description;
     if (dto.category !== undefined) patch.category = dto.category;
     if (dto.active !== undefined) patch.active = dto.active;
-    if (dto.priceRetail !== undefined) patch.priceRetail = dto.priceRetail;
+    if (dto.priceRetail !== undefined) {
+      patch.priceRetail = dto.priceRetail;
+    } else if (dto.price !== undefined) {
+      patch.priceRetail = dto.price;
+    }
     if (dto.priceWholesale !== undefined) patch.priceWholesale = dto.priceWholesale;
     if (dto.minWholesaleQty !== undefined) patch.minWholesaleQty = dto.minWholesaleQty;
     if (dto.compareAtPrice !== undefined) patch.compareAtPrice = dto.compareAtPrice;
