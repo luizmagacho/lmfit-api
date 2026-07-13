@@ -33,8 +33,11 @@ export const productImageUploadOptions: Options = (() => {
         allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'],
         format: 'jpg',
         public_id: (_req: Express.Request, file: Express.Multer.File) => {
-          const name = file.originalname.split('.')[0];
-          return `${randomUUID()}-${name}`.substring(0, 100);
+          const name = file.originalname.split('.')[0]
+            .replace(/\s+/g, '-')
+            .replace(/[^a-zA-Z0-9_-]/g, '');
+          const id = `${randomUUID()}-${name}`.substring(0, 100);
+          return id.trim().replace(/-+$/, '');
         },
       } as any, // Type as any due to multer-storage-cloudinary missing precise params typings
     });
