@@ -31,20 +31,57 @@ export class CashflowService {
       ? new Types.ObjectId(createdById)
       : undefined;
 
-    const docs = dto.transactions.map((tx) => ({
+    // 1. Deduplicate inside the batch itself
+    const seenSignatures = new Set<string>();
+    const uniqueTxs = dto.transactions.filter((tx) => {
+      const sig = `${tx.date}|${tx.hour}|${tx.amount}|${tx.name}|${tx.type}`;
+      if (seenSignatures.has(sig)) return false;
+      seenSignatures.add(sig);
+      return true;
+    });
+
+    // 2. Find which ones already exist in the DB
+    const existingDocs = await this.model.find({
       tenantId: new Types.ObjectId(tenantId),
-      date: new Date(tx.date),
-      hour: tx.hour,
-      type: tx.type,
-      name: tx.name,
-      detail: tx.detail,
-      amount: tx.amount,
-      source: dto.source ?? 'infinitepay',
-      importBatch: batchId,
-      periodFrom: dto.periodFrom ? new Date(dto.periodFrom) : undefined,
-      periodTo: dto.periodTo ? new Date(dto.periodTo) : undefined,
-      createdBy,
-    }));
+      $or: uniqueTxs.map((tx) => ({
+        date: new Date(tx.date),
+        hour: tx.hour,
+        amount: tx.amount,
+        name: tx.name,
+        type: tx.type,
+      })),
+    }).lean();
+
+    const existingSignatures = new Set(
+      existingDocs.map(
+        (doc) =>
+          `${doc.date.toISOString().split('T')[0]}|${doc.hour}|${doc.amount}|${doc.name}|${doc.type}`,
+      ),
+    );
+
+    const docs = uniqueTxs
+      .filter((tx) => {
+        const sig = `${tx.date}|${tx.hour}|${tx.amount}|${tx.name}|${tx.type}`;
+        return !existingSignatures.has(sig);
+      })
+      .map((tx) => ({
+        tenantId: new Types.ObjectId(tenantId),
+        date: new Date(tx.date),
+        hour: tx.hour,
+        type: tx.type,
+        name: tx.name,
+        detail: tx.detail,
+        amount: tx.amount,
+        source: dto.source ?? 'infinitepay',
+        importBatch: batchId,
+        periodFrom: dto.periodFrom ? new Date(dto.periodFrom) : undefined,
+        periodTo: dto.periodTo ? new Date(dto.periodTo) : undefined,
+        createdBy,
+      }));
+
+    if (docs.length === 0) {
+      return { importBatch: batchId, count: 0 };
+    }
 
     const inserted = await this.model.insertMany(docs);
 
