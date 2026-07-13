@@ -6,6 +6,7 @@ import type { CreateProductionBatchDto } from './dto/create-production-batch.dto
 import type { UpdateProductionBatchDto } from './dto/update-production-batch.dto';
 import { skipFromPage } from '../common/dto/pagination-query.dto';
 import { ProductVariant } from '../products/schemas/product-variant.schema';
+import { escapeRegex } from '../common/utils/text-search.util';
 
 @Injectable()
 export class ProductionService {
@@ -131,10 +132,11 @@ export class ProductionService {
     const q: Record<string, unknown> = { tenantId: this.tidFilter(tenantId) };
     if (status) q.status = status;
     if (search) {
+      const safe = escapeRegex(search);
       q.$or = [
-        { name: new RegExp(search, 'i') },
-        { sku: new RegExp(search, 'i') },
-        { notes: new RegExp(search, 'i') },
+        { name: new RegExp(safe, 'i') },
+        { sku: new RegExp(safe, 'i') },
+        { notes: new RegExp(safe, 'i') },
       ];
     }
     const [items, total] = await Promise.all([

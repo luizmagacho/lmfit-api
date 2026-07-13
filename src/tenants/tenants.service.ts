@@ -11,6 +11,7 @@ import { Tenant, type TenantDocument, type TenantPlan } from './schemas/tenant.s
 import { TenantRequest, type TenantRequestDocument } from './schemas/tenant-request.schema';
 import type { CreateTenantRequestDto } from './dto/create-tenant-request.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { escapeRegex } from '../common/utils/text-search.util';
 
 /* ------------------------------------------------------------------ */
 /*  Feature flags per plan                                            */
@@ -211,11 +212,12 @@ export class TenantsService {
   async list(page: number, limit: number, search?: string) {
     const skip = skipFromPage(page, limit);
 
-    const q = search
+    const safeSearch = search ? escapeRegex(search) : undefined;
+    const q = safeSearch
       ? {
           $or: [
-            { name: new RegExp(search, 'i') },
-            { slug: new RegExp(search, 'i') },
+            { name: new RegExp(safeSearch, 'i') },
+            { slug: new RegExp(safeSearch, 'i') },
           ],
         }
       : {};

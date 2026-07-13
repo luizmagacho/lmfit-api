@@ -17,6 +17,7 @@ import {
 } from './invoice-excel.constants';
 import { enrichInvoiceWithStatusI18n } from './invoice-status.i18n';
 import { Invoice } from './schemas/invoice.schema';
+import { escapeRegex } from '../common/utils/text-search.util';
 
 @Injectable()
 export class InvoicesService {
@@ -43,10 +44,11 @@ export class InvoicesService {
     const st = this.statusFilterClause(status);
     if (st) parts.push(st);
     if (search) {
+      const safe = escapeRegex(search);
       parts.push({
         $or: [
-          { number: new RegExp(search, 'i') },
-          { notes: new RegExp(search, 'i') },
+          { number: new RegExp(safe, 'i') },
+          { notes: new RegExp(safe, 'i') },
         ],
       });
     }

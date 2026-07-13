@@ -15,6 +15,7 @@ import {
   supplierImportHeaderAliases,
 } from './supplier-excel.constants';
 import { Supplier } from './schemas/supplier.schema';
+import { escapeRegex } from '../common/utils/text-search.util';
 
 @Injectable()
 export class SuppliersService {
@@ -34,9 +35,10 @@ export class SuppliersService {
   private listFilter(tenantId: string, search?: string) {
     const base: Record<string, any> = { tenantId: new Types.ObjectId(tenantId) };
     if (search) {
+      const safe = escapeRegex(search);
       base.$or = [
-        { name: new RegExp(search, 'i') },
-        { email: new RegExp(search, 'i') },
+        { name: new RegExp(safe, 'i') },
+        { email: new RegExp(safe, 'i') },
       ];
     }
     return base;

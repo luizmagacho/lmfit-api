@@ -12,6 +12,7 @@ import type { UserDocument, UserRole } from './schemas/user.schema';
 import { User } from './schemas/user.schema';
 import { USER_ROLE_VALUES } from './schemas/user.schema';
 import { USER_EXPORT_COLUMNS, userImportHeaderAliases } from './user-excel.constants';
+import { escapeRegex } from '../common/utils/text-search.util';
 
 @Injectable()
 export class UsersService {
@@ -94,9 +95,10 @@ export class UsersService {
   private listFilter(tenantId: string, search?: string) {
     const base: Record<string, any> = { tenantId: new Types.ObjectId(tenantId) };
     if (search) {
+      const safe = escapeRegex(search);
       base.$or = [
-        { name: new RegExp(search, 'i') },
-        { email: new RegExp(search, 'i') },
+        { name: new RegExp(safe, 'i') },
+        { email: new RegExp(safe, 'i') },
       ];
     }
     return base;
