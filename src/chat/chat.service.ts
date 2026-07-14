@@ -150,7 +150,7 @@ export class ChatService {
         const variants = Array.isArray(p.variants) ? (p.variants as Array<Record<string, unknown>>) : [];
         const retail = formatBRL(p.priceRetail);
         const wholesale = formatBRL(p.priceWholesale);
-        const minQty = Number(p.minWholesaleQty ?? 6);
+        const minQty = Number(p.minWholesaleQty ?? 1);
         const stock = stockSummary(variants, allowBackorder);
         const slug = String(p.slug ?? '');
         const variantLines = variants
@@ -206,7 +206,7 @@ export class ChatService {
         size: typeof v.size === 'string' ? v.size : undefined,
         priceRetail,
         priceWholesale,
-        minWholesaleQty: Number(v.minWholesaleQty ?? p.minWholesaleQty ?? 6),
+        minWholesaleQty: Number(v.minWholesaleQty ?? p.minWholesaleQty ?? 1),
         imageUrl: typeof p.primaryImageUrl === 'string' ? p.primaryImageUrl : null,
         quantity,
         isOrder,

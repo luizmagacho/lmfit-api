@@ -31,7 +31,9 @@ export class Product {
   @Prop({ type: Number })
   priceWholesale?: number | null;
 
-  @Prop({ type: Number, default: 6 })
+  /** Quantidade mínima pra valer o preço de atacado. Sem preenchimento = 1 (qualquer
+   * quantidade, inclusive uma peça só, pode ser vendida sem exigir um mínimo). */
+  @Prop({ type: Number, default: 1 })
   minWholesaleQty: number;
 
   @Prop({ type: Number })

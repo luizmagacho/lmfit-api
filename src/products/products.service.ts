@@ -155,7 +155,7 @@ export class ProductsService {
         ? minV
         : typeof minP === 'number' && !Number.isNaN(minP)
           ? minP
-          : 6;
+          : 1;
     o.minWholesaleQty = minW;
 
     return o;
@@ -197,7 +197,7 @@ export class ProductsService {
         ? minV
         : typeof minP === 'number' && !Number.isNaN(minP)
           ? minP
-          : 6;
+          : 1;
 
     return { priceRetail, priceWholesale, minWholesaleQty };
   }
@@ -243,7 +243,7 @@ export class ProductsService {
           ? minV
           : typeof minP === 'number' && !Number.isNaN(minP)
             ? minP
-            : 6;
+            : 1;
       out.set(String(v._id), { priceRetail, priceWholesale, minWholesaleQty });
     }
     return out;
@@ -265,7 +265,7 @@ export class ProductsService {
     const minWholesaleQty =
       typeof p.minWholesaleQty === 'number' && !Number.isNaN(p.minWholesaleQty)
         ? Number(p.minWholesaleQty)
-        : 6;
+        : 1;
     const sku =
       typeof first?.sku === 'string'
         ? first.sku
@@ -573,7 +573,7 @@ export class ProductsService {
       active: dto.active ?? true,
       priceRetail: computedPriceRetail ?? dto.priceRetail ?? dto.price,
       priceWholesale: dto.priceWholesale,
-      minWholesaleQty: dto.minWholesaleQty ?? 6,
+      minWholesaleQty: dto.minWholesaleQty ?? 1,
       compareAtPrice: dto.compareAtPrice,
       primaryImageUrl: dto.primaryImageUrl,
       images: dto.images ?? [],
