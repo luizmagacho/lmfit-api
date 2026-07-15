@@ -17,9 +17,6 @@ export function buildSearchFilter(
   const base: Record<string, any> = { tenantId: new Types.ObjectId(tenantId) };
   const trimmed = search?.trim();
   if (!trimmed) return base;
-  if (trimmed.length >= 3) {
-    return { ...base, $text: { $search: trimmed } };
-  }
   const safe = escapeRegex(trimmed);
   return { ...base, $or: regexFields.map((field) => ({ [field]: new RegExp(safe, 'i') })) };
 }
