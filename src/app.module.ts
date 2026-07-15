@@ -1,12 +1,13 @@
 import { join } from 'path';
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { MongooseModule } from '@nestjs/mongoose';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { SentryGlobalFilter, SentryModule } from '@sentry/nestjs/setup';
 import { AlertsModule } from './alerts/alerts.module';
 import { AppController } from './app.controller';
 import { AuditModule } from './audit/audit.module';
@@ -42,9 +43,11 @@ import { TenantsModule } from './tenants/tenants.module';
 import { TenantSubscriptionGuard } from './common/guards/tenant-subscription.guard';
 import { TenantThrottlerGuard } from './common/guards/tenant-throttler.guard';
 import { TenantMiddleware } from './common/middleware/tenant.middleware';
+import { SentryContextInterceptor } from './common/interceptors/sentry-context.interceptor';
 
 @Module({
   imports: [
+    SentryModule.forRoot(),
     ConfigModule.forRoot({ isGlobal: true }),
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
@@ -91,6 +94,14 @@ import { TenantMiddleware } from './common/middleware/tenant.middleware';
   ],
   controllers: [AppController],
   providers: [
+    {
+      provide: APP_FILTER,
+      useClass: SentryGlobalFilter,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: SentryContextInterceptor,
+    },
     {
       provide: APP_GUARD,
       useClass: TenantThrottlerGuard,

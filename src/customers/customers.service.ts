@@ -34,7 +34,28 @@ export class CustomersService {
   }
 
   private listFilter(tenantId: string, search?: string) {
-    return buildSearchFilter(tenantId, search, ['name', 'email', 'phone']);
+    // Walk-in ("Consumidor Final") fica fora das listagens, buscas e exports do
+    // CRM — ele só entra num pedido pelo botão dedicado do PDV.
+    return {
+      ...buildSearchFilter(tenantId, search, ['name', 'email', 'phone']),
+      walkIn: { $ne: true },
+    };
+  }
+
+  /**
+   * Retorna o cliente-placeholder "Consumidor Final" do tenant, criando-o na
+   * primeira venda sem cadastro. Upsert atômico: duas vendas simultâneas não
+   * criam registros duplicados.
+   */
+  async getOrCreateWalkIn(tenantId: string) {
+    return this.model
+      .findOneAndUpdate(
+        { tenantId: new Types.ObjectId(tenantId), walkIn: true },
+        { $setOnInsert: { name: 'Consumidor Final', walkIn: true } },
+        { new: true, upsert: true },
+      )
+      .lean()
+      .exec();
   }
 
   async findAll(tenantId: string, page: number, limit: number, search?: string) {

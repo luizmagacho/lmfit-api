@@ -49,6 +49,12 @@ export class CustomersController {
     return this.customers.create(tenantId, dto, user.sub);
   }
 
+  /** PDV: venda sem cadastro — retorna (criando se preciso) o "Consumidor Final" do tenant. */
+  @Post('walk-in')
+  walkIn(@TenantId() tenantId: string) {
+    return this.customers.getOrCreateWalkIn(tenantId);
+  }
+
   @Get()
   findAll(
     @Query() q: PaginationQueryDto,

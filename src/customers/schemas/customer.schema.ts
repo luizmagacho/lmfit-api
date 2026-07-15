@@ -51,6 +51,11 @@ export class Customer {
   @Prop({ type: [String], default: [] })
   tags: string[];
 
+  /** Cliente-placeholder "Consumidor Final" do PDV (um por tenant). Fica fora
+   * das listagens/exports do CRM e não acumula fidelidade. */
+  @Prop({ type: Boolean, default: false })
+  walkIn: boolean;
+
   @Prop({ type: Types.ObjectId, ref: 'User' })
   createdBy?: Types.ObjectId;
 }

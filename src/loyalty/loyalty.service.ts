@@ -19,7 +19,9 @@ export class LoyaltyService {
     if (points <= 0) return;
     await this.customerModel
       .findOneAndUpdate(
-        { _id: customerId, tenantId: new Types.ObjectId(tenantId) },
+        // Walk-in ("Consumidor Final") não acumula pontos — é um placeholder
+        // compartilhado por todas as vendas sem cadastro do tenant.
+        { _id: customerId, tenantId: new Types.ObjectId(tenantId), walkIn: { $ne: true } },
         { $inc: { loyaltyPoints: points } },
       )
       .exec();

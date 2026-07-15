@@ -199,6 +199,7 @@ export class PaymentsService {
       orderId: String(p.orderId),
       status: 'expired',
       amount: p.amount,
+      tenantId: String(p.tenantId),
     });
   }
 
@@ -221,6 +222,7 @@ export class PaymentsService {
         status: 'paid',
         amount: one.amount,
         paidAt: one.paidAt ? new Date(one.paidAt).toISOString() : undefined,
+        tenantId,
       });
     }
   }
@@ -240,6 +242,7 @@ export class PaymentsService {
         orderId: String(orderId),
         status: 'cancelled',
         amount: pay.amount,
+        tenantId,
       });
     }
   }
