@@ -17,6 +17,11 @@ export class Material {
   @Prop({ type: Number, default: 0 })
   quantityOnHand: number;
 
+  /** Custo unitário do insumo (mesma convenção de dinheiro do resto do app — número puro
+   *  no banco, string BRL na resposta via `BrlMoneyResponseInterceptor`). */
+  @Prop({ type: Number })
+  costPrice?: number;
+
   @Prop({ trim: true })
   notes?: string;
 

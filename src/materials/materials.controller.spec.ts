@@ -32,4 +32,10 @@ describe('MaterialsController', () => {
     await controller.create('tenant-1', dto);
     expect(service.create).toHaveBeenCalledWith('tenant-1', dto);
   });
+
+  it('delegates findAll with the parsed pagination query (page/limit/search)', async () => {
+    service.findAll.mockResolvedValue({ items: [], total: 0, page: 2, limit: 10 });
+    await controller.findAll({ page: 2, limit: 10, search: 'malha' } as any, 'tenant-1');
+    expect(service.findAll).toHaveBeenCalledWith('tenant-1', 2, 10, 'malha');
+  });
 });
