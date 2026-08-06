@@ -61,4 +61,9 @@ export class UpdateBrandingDto {
   @IsOptional()
   @IsString()
   metaWhatsappAccessToken?: string;
+
+  @ApiPropertyOptional({ default: false })
+  @IsOptional()
+  @IsBoolean()
+  whatsappAiEnabled?: boolean;
 }

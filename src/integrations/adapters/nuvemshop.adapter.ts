@@ -7,6 +7,7 @@ import { IntegrationPlatform, IntegrationCredentials } from '../schemas/integrat
 @Injectable()
 export class NuvemshopAdapter implements PlatformAdapter {
   platform: IntegrationPlatform = 'nuvemshop';
+  readonly webhookSignatureHeader = 'x-linkedstore-hmac-sha256';
   private readonly logger = new Logger(NuvemshopAdapter.name);
 
   async testConnection(credentials: IntegrationCredentials): Promise<{ ok: boolean; storeName?: string; error?: string }> {

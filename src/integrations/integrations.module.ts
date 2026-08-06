@@ -7,6 +7,7 @@ import { ProductVariant, ProductVariantSchema } from '../products/schemas/produc
 import { OrdersModule } from '../orders/orders.module';
 import { FiscalModule } from '../fiscal/fiscal.module';
 import { CustomersModule } from '../customers/customers.module';
+import { TenantsModule } from '../tenants/tenants.module';
 import { IntegrationsService } from './integrations.service';
 import { ProductMappingService } from './product-mapping.service';
 import { SyncEngineService } from './sync-engine.service';
@@ -33,6 +34,7 @@ import { SyncCronService } from './sync-cron.service';
     OrdersModule,
     FiscalModule,
     CustomersModule,
+    TenantsModule,
   ],
   controllers: [IntegrationsController, IntegrationsWebhookController],
   providers: [

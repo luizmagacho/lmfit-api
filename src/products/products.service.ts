@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Model, Types } from 'mongoose';
+import { Model, PipelineStage, Types } from 'mongoose';
 import type { StaffImportResponse } from '../common/dto/staff-import.response';
 import { parseBooleanLoose } from '../common/excel/cell-coerce';
 import { ExcelSpreadsheetService } from '../common/excel/excel-spreadsheet.service';
@@ -19,6 +19,7 @@ import type { StockMovementDto } from './dto/stock-movement.dto';
 import type { ProductsBulkPatchDto } from './dto/products-bulk-patch.dto';
 import type { UpdateProductDto } from './dto/update-product.dto';
 import type { UpdateVariantDto } from './dto/update-variant.dto';
+import { PublicCatalogQueryDto } from './dto/public-catalog-query.dto';
 import { Product } from './schemas/product.schema';
 import { ProductVariant } from './schemas/product-variant.schema';
 import type { StockReason } from './schemas/stock-ledger.schema';
@@ -569,6 +570,8 @@ export class ProductsService {
       name: dto.name,
       slug: dto.slug.toLowerCase(),
       description: dto.description,
+      composition: dto.composition,
+      careInstructions: dto.careInstructions,
       category: dto.category,
       active: dto.active ?? true,
       priceRetail: computedPriceRetail ?? dto.priceRetail ?? dto.price,
@@ -1038,6 +1041,8 @@ export class ProductsService {
     if (dto.name !== undefined) patch.name = dto.name;
     if (dto.slug !== undefined) patch.slug = dto.slug.toLowerCase();
     if (dto.description !== undefined) patch.description = dto.description;
+    if (dto.composition !== undefined) patch.composition = dto.composition;
+    if (dto.careInstructions !== undefined) patch.careInstructions = dto.careInstructions;
     if (dto.category !== undefined) patch.category = dto.category;
     if (dto.active !== undefined) patch.active = dto.active;
     if (dto.priceRetail !== undefined) {
@@ -1197,8 +1202,9 @@ export class ProductsService {
       note: dto.note,
       orderId,
       createdBy: createdBy ? new Types.ObjectId(createdBy) : undefined,
+      locationId: dto.locationId ? new Types.ObjectId(dto.locationId) : undefined,
     });
-    await this.locations.adjust(String(v.tenantId), v._id as Types.ObjectId, dto.delta);
+    await this.locations.adjust(String(v.tenantId), v._id as Types.ObjectId, dto.delta, dto.locationId);
 
     // Notify integrations of stock change
     this.eventEmitter.emit('stock.changed', {
@@ -1249,6 +1255,7 @@ export class ProductsService {
     quantitySold: number,
     createdBy?: string,
     tenantId?: string,
+    locationId?: string,
   ) {
     if (!Types.ObjectId.isValid(variantId)) throw new NotFoundException();
     const vid = new Types.ObjectId(variantId);
@@ -1268,6 +1275,7 @@ export class ProductsService {
         delta,
         reason: 'sale',
         note: `Venda pedido ${orderId.toString()}`,
+        locationId,
       },
       createdBy,
       orderId,
@@ -1282,6 +1290,7 @@ export class ProductsService {
     variantId: string,
     createdBy?: string,
     tenantId?: string,
+    locationId?: string,
   ) {
     if (!Types.ObjectId.isValid(variantId)) throw new NotFoundException();
     const vid = new Types.ObjectId(variantId);
@@ -1300,10 +1309,82 @@ export class ProductsService {
         delta,
         reason: 'sale_reversal' as StockReason,
         note: `Estorno pedido ${orderId.toString()}`,
+        locationId,
       },
       createdBy,
       orderId,
     );
+  }
+
+  /**
+   * Reserves up to `requestedQty` of a variant for an offline-synced sale at a specific
+   * location, never blocking: takes everything asked for if truly available (both at that
+   * location AND tenant-wide), otherwise takes whatever it can and returns the smaller
+   * fulfilled amount — the caller (`OrdersService.syncBatch`) turns any shortfall into a
+   * backorder line instead of failing the sale.
+   *
+   * Reserves at the location first (the authoritative, always-enforced cap per PDV-OFF-2),
+   * then re-confirms the same amount against the tenant-wide `quantityOnHand` using the same
+   * atomic pattern. The two should normally agree (a location's stock is a subset of the
+   * tenant total), but if they ever drifted apart and the tenant-wide figure is lower, the
+   * difference is given back to the location so its `StockLevel` never quietly overstates
+   * what was actually sold.
+   */
+  async reserveForOfflineSale(
+    tenantId: string,
+    variantId: string,
+    locationId: string | undefined,
+    requestedQty: number,
+    orderId: Types.ObjectId,
+    createdBy?: string,
+  ): Promise<number> {
+    if (requestedQty <= 0) return 0;
+    if (!Types.ObjectId.isValid(variantId)) throw new NotFoundException();
+    const vid = new Types.ObjectId(variantId);
+    const resolvedLocationId = locationId ?? String((await this.locations.getOrCreateDefault(tenantId))._id);
+
+    const locationFulfilled = await this.locations.reserveUpToAvailable(
+      tenantId,
+      vid,
+      resolvedLocationId,
+      requestedQty,
+    );
+    if (locationFulfilled <= 0) return 0;
+
+    const before = await this.variantModel
+      .findOneAndUpdate(
+        { _id: vid, tenantId: new Types.ObjectId(tenantId) },
+        [{ $set: { quantityOnHand: { $max: [{ $subtract: ['$quantityOnHand', locationFulfilled] }, 0] } } }],
+        { updatePipeline: true },
+      )
+      .exec();
+    const variantFulfilled = before ? Math.min(before.quantityOnHand, locationFulfilled) : 0;
+
+    const giveBack = locationFulfilled - variantFulfilled;
+    if (giveBack > 0) {
+      await this.locations.adjust(tenantId, vid, giveBack, resolvedLocationId);
+    }
+    if (variantFulfilled <= 0) return 0;
+
+    await this.ledgerModel.create({
+      tenantId: new Types.ObjectId(tenantId),
+      variantId: vid,
+      delta: -variantFulfilled,
+      reason: 'sale',
+      note: `Venda offline (PDV) pedido ${orderId.toString()}`,
+      orderId,
+      createdBy: createdBy ? new Types.ObjectId(createdBy) : undefined,
+      locationId: new Types.ObjectId(resolvedLocationId),
+    });
+
+    this.eventEmitter.emit('stock.changed', {
+      tenantId,
+      variantId,
+      newQuantity: before ? before.quantityOnHand - variantFulfilled : undefined,
+      reason: 'sale',
+    });
+
+    return variantFulfilled;
   }
 
   /** Group lines by variantId and apply sale deltas so net equals minus total qty per variant. */
@@ -1312,6 +1393,7 @@ export class ProductsService {
     lines: Array<{ variantId: Types.ObjectId; quantity: number }>,
     createdBy?: string,
     tenantId?: string,
+    locationId?: string,
   ) {
     const byVar = new Map<string, number>();
     for (const l of lines) {
@@ -1319,7 +1401,7 @@ export class ProductsService {
       byVar.set(k, (byVar.get(k) ?? 0) + l.quantity);
     }
     for (const [vidStr, qty] of byVar) {
-      await this.applySaleDeductionForOrderLine(orderId, vidStr, qty, createdBy, tenantId);
+      await this.applySaleDeductionForOrderLine(orderId, vidStr, qty, createdBy, tenantId, locationId);
     }
   }
 
@@ -1328,13 +1410,14 @@ export class ProductsService {
     lines: Array<{ variantId: Types.ObjectId }>,
     createdBy?: string,
     tenantId?: string,
+    locationId?: string,
   ) {
     const seen = new Set<string>();
     for (const l of lines) {
       const k = l.variantId.toString();
       if (seen.has(k)) continue;
       seen.add(k);
-      await this.applySaleReversalForOrderVariant(orderId, k, createdBy, tenantId);
+      await this.applySaleReversalForOrderVariant(orderId, k, createdBy, tenantId, locationId);
     }
   }
 
@@ -1483,27 +1566,78 @@ export class ProductsService {
     return { updated, failed };
   }
 
-  async listPublicCatalog(tenantId: string): Promise<Record<string, unknown>[]> {
-    const raw = await this.productModel
-      .aggregate([
-        {
-          $match: {
-            tenantId: new Types.ObjectId(tenantId),
-            active: true,
-          },
+  async listPublicCatalog(
+    tenantId: string,
+    query: PublicCatalogQueryDto = new PublicCatalogQueryDto(),
+  ): Promise<{
+    items: Record<string, unknown>[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const { page, limit, category, size, color, priceMin, priceMax, sort } = query;
+
+    const match: Record<string, unknown> = {
+      tenantId: new Types.ObjectId(tenantId),
+      active: true,
+    };
+    if (category) match.category = category;
+
+    const pipeline: PipelineStage[] = [
+      { $match: match },
+      {
+        $lookup: {
+          from: 'productvariants',
+          localField: '_id',
+          foreignField: 'productId',
+          as: 'variants',
         },
-        { $sort: { name: 1 } },
-        {
-          $lookup: {
-            from: 'productvariants',
-            localField: '_id',
-            foreignField: 'productId',
-            as: 'variants',
-          },
-        },
-      ])
-      .exec();
-    return raw.map((doc) => {
+      },
+    ];
+
+    // Cor/tamanho devem casar na mesma variante (é um SKU específico); preço é checado
+    // independentemente (qualquer variante do produto dentro da faixa já qualifica o produto).
+    const variantElemMatch: Record<string, unknown> = {};
+    if (size) variantElemMatch.size = size;
+    if (color) variantElemMatch.color = color;
+    const variantMatchStages: Record<string, unknown>[] = [];
+    if (Object.keys(variantElemMatch).length > 0) {
+      variantMatchStages.push({ variants: { $elemMatch: variantElemMatch } });
+    }
+    if (priceMin !== undefined || priceMax !== undefined) {
+      const priceCond: Record<string, number> = {};
+      if (priceMin !== undefined) priceCond.$gte = priceMin;
+      if (priceMax !== undefined) priceCond.$lte = priceMax;
+      variantMatchStages.push({ variants: { $elemMatch: { price: priceCond } } });
+    }
+    if (variantMatchStages.length === 1) {
+      pipeline.push({ $match: variantMatchStages[0] });
+    } else if (variantMatchStages.length > 1) {
+      pipeline.push({ $match: { $and: variantMatchStages } });
+    }
+
+    pipeline.push({ $addFields: { minVariantPrice: { $min: '$variants.price' } } });
+    const sortStage: Record<string, 1 | -1> =
+      sort === 'menor-preco'
+        ? { minVariantPrice: 1 }
+        : sort === 'maior-preco'
+          ? { minVariantPrice: -1 }
+          : sort === 'lancamentos'
+            ? { createdAt: -1 }
+            : { name: 1 };
+    pipeline.push({ $sort: sortStage });
+
+    const countPipeline = [...pipeline, { $count: 'total' }];
+    const skip = skipFromPage(page, limit);
+    pipeline.push({ $skip: skip }, { $limit: limit });
+
+    const [raw, countRes] = await Promise.all([
+      this.productModel.aggregate(pipeline).exec(),
+      this.productModel.aggregate(countPipeline).exec(),
+    ]);
+    const total = (countRes[0] as { total?: number } | undefined)?.total ?? 0;
+
+    const items = raw.map((doc) => {
       const p = doc as unknown as Record<string, unknown>;
       const rawVariants = Array.isArray(p.variants) ? p.variants : [];
       const variants = rawVariants.map((v) =>
@@ -1511,5 +1645,96 @@ export class ProductsService {
       );
       return this.enrichProductPricing({ ...p, variants }, variants);
     });
+
+    return { items, total, page, limit };
+  }
+
+  /** Fetches active products by id, shaped like listPublicCatalog items (variants +
+   *  enriched pricing) so the frontend can render them with the same ProductGrid used for
+   *  the storefront — used by the customer wishlist. IDs pointing at inactive/deleted
+   *  products are silently dropped rather than erroring. */
+  async getPublicProductsByIds(tenantId: string, ids: string[]): Promise<Record<string, unknown>[]> {
+    const objectIds = ids.filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id));
+    if (!objectIds.length) return [];
+
+    const pipeline: PipelineStage[] = [
+      { $match: { tenantId: new Types.ObjectId(tenantId), active: true, _id: { $in: objectIds } } },
+      {
+        $lookup: {
+          from: 'productvariants',
+          localField: '_id',
+          foreignField: 'productId',
+          as: 'variants',
+        },
+      },
+    ];
+    const raw = await this.productModel.aggregate(pipeline).exec();
+    return raw.map((doc) => {
+      const p = doc as unknown as Record<string, unknown>;
+      const rawVariants = Array.isArray(p.variants) ? p.variants : [];
+      const variants = rawVariants.map((v) => this.mapVariantForApi(v as Record<string, unknown>, p));
+      return this.enrichProductPricing({ ...p, variants }, variants);
+    });
+  }
+
+  async getPublicCatalogFacets(tenantId: string): Promise<{
+    categories: string[];
+    colors: string[];
+    sizes: string[];
+    priceMin: number;
+    priceMax: number;
+  }> {
+    const [categories, variantFacets] = await Promise.all([
+      this.productModel
+        .distinct('category', {
+          tenantId: new Types.ObjectId(tenantId),
+          active: true,
+          category: { $nin: [null, ''] },
+        } as Record<string, unknown>)
+        .exec(),
+      this.productModel
+        .aggregate([
+          { $match: { tenantId: new Types.ObjectId(tenantId), active: true } },
+          {
+            $lookup: {
+              from: 'productvariants',
+              localField: '_id',
+              foreignField: 'productId',
+              as: 'variants',
+            },
+          },
+          { $unwind: '$variants' },
+          {
+            $group: {
+              _id: null,
+              colors: { $addToSet: '$variants.color' },
+              sizes: { $addToSet: '$variants.size' },
+              priceMin: { $min: '$variants.price' },
+              priceMax: { $max: '$variants.price' },
+            },
+          },
+        ])
+        .exec(),
+    ]);
+
+    const facets = variantFacets[0] as
+      | { colors?: unknown[]; sizes?: unknown[]; priceMin?: number; priceMax?: number }
+      | undefined;
+    const colors = (facets?.colors ?? [])
+      .filter((c): c is string => typeof c === 'string' && c.trim().length > 0)
+      .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    const sizes = (facets?.sizes ?? [])
+      .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+      .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+    return {
+      categories: (categories as string[])
+        .filter((c) => typeof c === 'string' && c.trim().length > 0)
+        .sort((a, b) => a.localeCompare(b, 'pt-BR')),
+      colors,
+      sizes,
+      priceMin: typeof facets?.priceMin === 'number' ? facets.priceMin : 0,
+      priceMax: typeof facets?.priceMax === 'number' ? facets.priceMax : 0,
+    };
   }
 }

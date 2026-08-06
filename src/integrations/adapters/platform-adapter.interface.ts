@@ -58,5 +58,12 @@ export interface PlatformAdapter {
   updateStock?(...args: any[]): Promise<any>;
   listOrders?(credentials: IntegrationCredentials, since?: Date): any;
   registerWebhook?(...args: any[]): Promise<any>;
+  /** Nome (case-insensitive) do header HTTP que carrega a assinatura do webhook desta
+   *  plataforma — usado por `IntegrationsWebhookController` para extrair o valor antes de
+   *  chamar `verifyWebhookSignature`. Ausente nos adapters-stub (tray/loja_integrada/shopify). */
+  readonly webhookSignatureHeader?: string;
+  /** Verifica a assinatura de um webhook inbound: `(rawBody, signatureHeaderValue, secret) => boolean`. */
   verifyWebhookSignature?(...args: any[]): boolean;
+  /** Só as plataformas com OAuth2 real (Mercado Livre, Shopee, TikTok) implementam isto. */
+  refreshAccessToken?(...args: any[]): Promise<{ ok: boolean; accessToken?: string; refreshToken?: string; error?: string }>;
 }

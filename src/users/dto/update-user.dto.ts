@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsIn, IsMongoId, IsOptional, IsString, MinLength } from 'class-validator';
 import { USER_ROLE_VALUES, type UserRole } from '../schemas/user.schema';
 
 export class UpdateUserDto {
@@ -19,4 +19,9 @@ export class UpdateUserDto {
   @IsString()
   @MinLength(6)
   password?: string;
+
+  @ApiPropertyOptional({ description: 'Local fixo de trabalho (PDV offline); null para remover' })
+  @IsOptional()
+  @IsMongoId()
+  assignedLocationId?: string | null;
 }

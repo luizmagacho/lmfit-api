@@ -29,9 +29,9 @@ export class ReturnLineInputDto {
 }
 
 export class CreateReturnDto {
-  @ApiProperty({ enum: ['return', 'exchange'] })
-  @IsEnum(['return', 'exchange'])
-  type: 'return' | 'exchange';
+  @ApiProperty({ enum: ['return', 'exchange', 'refund'] })
+  @IsEnum(['return', 'exchange', 'refund'])
+  type: 'return' | 'exchange' | 'refund';
 
   @ApiProperty({ type: [ReturnLineInputDto] })
   @IsArray()
@@ -44,4 +44,46 @@ export class CreateReturnDto {
   @IsOptional()
   @IsString()
   notes?: string;
+}
+
+/** Base compartilhada pelas solicitações feitas pelo cliente (guest ou logado) — mesmas linhas/tipo/
+ *  notas de `CreateReturnDto`, mais a variante desejada (informativa) para `type: 'exchange'`. */
+export class CreateReturnRequestDto extends CreateReturnDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsMongoId()
+  desiredVariantId?: string;
+}
+
+export class PublicReturnLookupDto {
+  @ApiProperty()
+  @IsNumber()
+  orderNumber: number;
+
+  @ApiProperty()
+  @IsString()
+  phone: string;
+}
+
+export class PublicReturnRequestDto extends CreateReturnRequestDto {
+  @ApiProperty()
+  @IsNumber()
+  orderNumber: number;
+
+  @ApiProperty()
+  @IsString()
+  phone: string;
+}
+
+export class CustomerReturnRequestDto extends CreateReturnRequestDto {
+  @ApiProperty()
+  @IsMongoId()
+  orderId: string;
+}
+
+export class RejectReturnDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  note?: string;
 }

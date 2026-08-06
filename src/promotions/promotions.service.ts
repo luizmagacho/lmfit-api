@@ -19,11 +19,15 @@ export class PromotionsService {
       .lean()
       .exec();
     if (exists) throw new BadRequestException(`Já existe um cupom com o código ${code}`);
+    // `influencerId` chega como string do form (o ResourceList do admin manda "" pra "sem
+    // influenciador") — string vazia quebraria o cast automático do Mongoose pra ObjectId.
+    const influencerId = dto.influencerId?.trim();
     return this.model.create({
       ...dto,
       code,
       tenantId: new Types.ObjectId(tenantId),
       createdBy: createdBy ? new Types.ObjectId(createdBy) : undefined,
+      influencerId: influencerId ? new Types.ObjectId(influencerId) : undefined,
     });
   }
 
@@ -51,15 +55,42 @@ export class PromotionsService {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
     const patch: Record<string, unknown> = { ...dto };
     if (dto.code) patch.code = dto.code.trim().toUpperCase();
+
+    // `$set: {influencerId: undefined}` NÃO remove o campo no MongoDB — precisa de `$unset`
+    // explícito quando o admin escolhe "— Nenhum —" (string vazia) pra desvincular o cupom.
+    const updateOps: Record<string, unknown> = { $set: patch };
+    if (dto.influencerId !== undefined) {
+      const trimmed = dto.influencerId.trim();
+      delete patch.influencerId;
+      if (trimmed) {
+        patch.influencerId = new Types.ObjectId(trimmed);
+      } else {
+        updateOps.$unset = { influencerId: '' };
+      }
+    }
+
     const doc = await this.model
-      .findOneAndUpdate({ _id: id, tenantId: new Types.ObjectId(tenantId) }, { $set: patch }, { new: true })
+      .findOneAndUpdate({ _id: id, tenantId: new Types.ObjectId(tenantId) }, updateOps, { new: true })
       .exec();
     if (!doc) throw new NotFoundException();
     return doc;
   }
 
+  /** Recusa excluir um cupom que já teve uso (`usedCount > 0`) — protege o histórico do relatório
+   *  de vendas por influenciador (Loop Influencer-C). Desativar (`active:false`) via `update()`
+   *  continua disponível normalmente. */
   async remove(tenantId: string, id: string) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
+    const promo = await this.model
+      .findOne({ _id: id, tenantId: new Types.ObjectId(tenantId) })
+      .lean()
+      .exec();
+    if (!promo) throw new NotFoundException();
+    if (promo.usedCount > 0) {
+      throw new BadRequestException(
+        'Este cupom já foi usado em vendas — desative em vez de excluir, pra não perder o histórico do relatório.',
+      );
+    }
     const res = await this.model
       .findOneAndDelete({ _id: id, tenantId: new Types.ObjectId(tenantId) })
       .exec();

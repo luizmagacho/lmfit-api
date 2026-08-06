@@ -22,7 +22,47 @@ const API_BASE = 'https://partner.shopeemobile.com';
 @Injectable()
 export class ShopeeAdapter implements PlatformAdapter {
   platform: IntegrationPlatform = 'shopee';
+  /** Shopee Open Platform v2 envia a assinatura do push notification neste header. */
+  readonly webhookSignatureHeader = 'authorization';
   private readonly logger = new Logger(ShopeeAdapter.name);
+
+  /**
+   * Verifica a assinatura de um push notification Shopee: HMAC-SHA256 de `{callbackUrl}|{rawBody}`
+   * com o partner_key do app, comparado ao header `Authorization`. Mesma ressalva do restante
+   * deste adapter: construído a partir da doc pública, sem sandbox real pra validar o formato
+   * exato — confirmar antes de ir pra produção.
+   */
+  verifyWebhookSignature(payload: Buffer, signatureHeader: string, secret: string, callbackUrl?: string): boolean {
+    if (!signatureHeader) return false;
+    const base = `${callbackUrl ?? ''}|${payload.toString('utf8')}`;
+    const expected = crypto.createHmac('sha256', secret).update(base).digest('hex');
+    try {
+      return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signatureHeader));
+    } catch {
+      return false;
+    }
+  }
+
+  /** Troca `refresh_token` por um novo `access_token` (Shopee expira em ~4h). */
+  async refreshAccessToken(partnerId: string, partnerKey: string, refreshToken: string, shopId: string): Promise<{ ok: boolean; accessToken?: string; refreshToken?: string; error?: string }> {
+    const path = '/api/v2/auth/access_token/get';
+    const { timestamp, sign } = this.sign(partnerId, partnerKey, path);
+    try {
+      const res = await axios.post(
+        `${API_BASE}${path}`,
+        { refresh_token: refreshToken, partner_id: Number(partnerId), shop_id: Number(shopId) },
+        { params: { partner_id: partnerId, timestamp, sign }, headers: { 'Content-Type': 'application/json' }, timeout: 15_000 },
+      );
+      if (!res.data?.access_token) {
+        return { ok: false, error: res.data?.message ?? 'Resposta sem access_token' };
+      }
+      return { ok: true, accessToken: res.data.access_token, refreshToken: res.data.refresh_token };
+    } catch (error: any) {
+      const message = error.response?.data?.message ?? error.message;
+      this.logger.error(`Shopee token refresh failed: ${message}`);
+      return { ok: false, error: message };
+    }
+  }
 
   private sign(partnerId: string, partnerKey: string, path: string, extra = ''): { timestamp: number; sign: string } {
     const timestamp = Math.floor(Date.now() / 1000);

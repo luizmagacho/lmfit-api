@@ -42,6 +42,11 @@ export class User {
 
   @Prop({ type: Types.ObjectId, ref: 'User' })
   createdBy?: Types.ObjectId;
+
+  /** Local fixo de trabalho (PDV offline) — usado como fonte da alocação de estoque do
+   *  funcionário; opcional, sem valor até um admin atribuir um local. */
+  @Prop({ type: Types.ObjectId, ref: 'Location' })
+  assignedLocationId?: Types.ObjectId;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

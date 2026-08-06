@@ -12,6 +12,8 @@ import { OrdersService } from '../orders/orders.service';
 import { FiscalService } from '../fiscal/fiscal.service';
 import { CustomersService } from '../customers/customers.service';
 import { TiktokAdapter } from './adapters/tiktok.adapter';
+import { MercadoLivreAdapter } from './adapters/mercadolivre.adapter';
+import { ShopeeAdapter } from './adapters/shopee.adapter';
 
 export interface StockChangedEvent {
   tenantId: string;
@@ -34,6 +36,8 @@ export class SyncEngineService {
     private readonly fiscal: FiscalService,
     private readonly customers: CustomersService,
     private readonly tiktokAdapter: TiktokAdapter,
+    private readonly mercadoLivreAdapter: MercadoLivreAdapter,
+    private readonly shopeeAdapter: ShopeeAdapter,
   ) {}
 
   @OnEvent('stock.changed', { async: true })
@@ -162,7 +166,7 @@ export class SyncEngineService {
       try {
         step = await iterator.next();
       } catch (err: any) {
-        if (!refreshedOnce && (await this.tryRefreshTiktokToken(integration, err))) {
+        if (!refreshedOnce && (await this.tryRefreshToken(integration, err))) {
           refreshedOnce = true;
           iterator = adapter.listOrders(integration.credentials, since);
           continue;
@@ -240,14 +244,25 @@ export class SyncEngineService {
     });
   }
 
-  /** Só o TikTok Shop tem refresh de token implementado hoje; outras plataformas retornam false (sem retry). */
-  private async tryRefreshTiktokToken(integration: IntegrationDocument, err: any): Promise<boolean> {
-    if (integration.platform !== 'tiktok') return false;
-    const { applicationKey, apiKey, refreshToken } = integration.credentials;
+  /** TikTok Shop, Mercado Livre e Shopee têm refresh de OAuth token; as demais plataformas (Bagy/Nuvemshop/…) usam token de longa duração e não precisam disso, então retornam false (sem retry). */
+  private async tryRefreshToken(integration: IntegrationDocument, err: any): Promise<boolean> {
+    const { applicationKey, apiKey, refreshToken, storeId } = integration.credentials;
     if (!applicationKey || !apiKey || !refreshToken) return false;
-    const result = await this.tiktokAdapter.refreshAccessToken(applicationKey, apiKey, refreshToken);
+
+    let result: { ok: boolean; accessToken?: string; refreshToken?: string; error?: string };
+    if (integration.platform === 'tiktok') {
+      result = await this.tiktokAdapter.refreshAccessToken(applicationKey, apiKey, refreshToken);
+    } else if (integration.platform === 'mercadolivre') {
+      result = await this.mercadoLivreAdapter.refreshAccessToken(applicationKey, apiKey, refreshToken);
+    } else if (integration.platform === 'shopee') {
+      if (!storeId) return false;
+      result = await this.shopeeAdapter.refreshAccessToken(applicationKey, apiKey, refreshToken, storeId);
+    } else {
+      return false;
+    }
+
     if (!result.ok || !result.accessToken) {
-      this.logger.error(`Refresh de token TikTok falhou pra integração ${integration._id}: ${result.error ?? err.message}`);
+      this.logger.error(`Refresh de token (${integration.platform}) falhou pra integração ${integration._id}: ${result.error ?? err.message}`);
       return false;
     }
     await this.integrationModel.updateOne(

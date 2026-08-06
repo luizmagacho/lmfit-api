@@ -47,6 +47,20 @@ export class Payment {
 
   @Prop({ trim: true })
   captureMethod?: string;
+
+  /**
+   * Loop 17 — estorno registrado manualmente: o funcionário estorna na InfinitePay (ou combina
+   * diretamente com o cliente) e só então marca aqui. Nenhuma chamada de API de estorno é feita —
+   * não existe endpoint de estorno da InfinitePay disponível/confirmado neste projeto.
+   */
+  @Prop({ type: Date })
+  refundedAt?: Date;
+
+  @Prop({ type: Number })
+  refundAmount?: number;
+
+  @Prop({ type: Types.ObjectId, ref: 'User' })
+  refundedBy?: Types.ObjectId;
 }
 
 export const PaymentSchema = SchemaFactory.createForClass(Payment);

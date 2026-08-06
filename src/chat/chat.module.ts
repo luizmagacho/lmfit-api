@@ -9,5 +9,6 @@ import { PublicChatController } from './public-chat.controller';
   imports: [CatalogModule, LlmModule, LeadsModule],
   controllers: [PublicChatController],
   providers: [ChatService],
+  exports: [ChatService],
 })
 export class ChatModule {}

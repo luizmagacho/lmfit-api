@@ -32,6 +32,16 @@ export class CreateProductDto {
   @IsString()
   description?: string;
 
+  @ApiPropertyOptional({ description: 'Composição do tecido (ex.: "100% poliéster")' })
+  @IsOptional()
+  @IsString()
+  composition?: string;
+
+  @ApiPropertyOptional({ description: 'Instruções de cuidado/lavagem' })
+  @IsOptional()
+  @IsString()
+  careInstructions?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

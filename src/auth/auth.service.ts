@@ -45,11 +45,13 @@ export class AuthService {
     });
 
     const role = normalizeRoleForJwt(user.role as UserRole);
+    const locationId = user.assignedLocationId ? String(user.assignedLocationId) : undefined;
     const payload: JwtUserPayload = {
       sub: String(user._id),
       email: user.email,
       role,
       tenantId: String(user.tenantId),
+      locationId,
     };
     const accessToken = await this.jwt.signAsync(
       { ...payload },
@@ -68,6 +70,7 @@ export class AuthService {
         name: user.name,
         role,
         tenantId: String(user.tenantId),
+        locationId,
       },
     };
   }
@@ -95,11 +98,13 @@ export class AuthService {
     });
 
     const role = normalizeRoleForJwt(user.role as UserRole);
+    const locationId = user.assignedLocationId ? String(user.assignedLocationId) : undefined;
     const payload: JwtUserPayload = {
       sub: String(user._id),
       email: user.email,
       role,
       tenantId: String(user.tenantId),
+      locationId,
     };
     const accessToken = await this.jwt.signAsync(
       { ...payload },
@@ -118,6 +123,7 @@ export class AuthService {
         name: user.name,
         role,
         tenantId: String(user.tenantId),
+        locationId,
       },
     };
   }
@@ -137,6 +143,7 @@ export class AuthService {
       name: user.name,
       role: normalizeRoleForJwt(user.role as UserRole),
       tenantId: String(user.tenantId),
+      locationId: user.assignedLocationId ? String(user.assignedLocationId) : undefined,
     };
   }
 }

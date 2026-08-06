@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsMongoId, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class StockMovementDto {
   @ApiProperty({ description: 'Positive to add stock, negative to remove' })
@@ -36,4 +36,9 @@ export class StockMovementDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @ApiPropertyOptional({ description: 'Local onde o movimento ocorreu (padrão do tenant se ausente)' })
+  @IsOptional()
+  @IsMongoId()
+  locationId?: string;
 }

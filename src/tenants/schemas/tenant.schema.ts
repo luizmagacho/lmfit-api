@@ -38,6 +38,118 @@ export class LoyaltyConfig {
   @Prop({ default: 0.01 }) redeemValuePerPoint: number;
 }
 
+/** Frete v1 por método (Loop 3): taxa fixa por método + isenção acima de um valor de subtotal.
+ *  `pickup` nunca cobra, independente de config. Cálculo real acontece sempre no servidor —
+ *  o valor nunca é aceito vindo do cliente (ver order-drafts.service.ts `computeShippingCost`). */
+export class ShippingConfig {
+  @Prop({ trim: true, default: 'Retirada em Loja' }) pickupLabel: string;
+  @Prop({ default: 19.9, min: 0 }) standardFee: number;
+  @Prop({ default: 39.9, min: 0 }) expressFee: number;
+  /** Subtotal (produtos, antes do desconto Pix) a partir do qual standard/express ficam grátis.
+   *  `undefined`/0 = sem isenção. */
+  @Prop({ min: 0 }) freeAboveTotal?: number;
+}
+
+/** Camada de marca da loja pública v1 (Loop 4): estilo visual + avisos + liga/desliga.
+ *  `themePreset` indexa uma tabela de tokens fixa no código do web (não é DB-editável) — ver
+ *  STOREFRONT-V2.md §2.10 / storefrontPresets.ts. */
+/** Textos das páginas institucionais (Loop 4 continuação) — CMS-lite: texto puro, sem editor rico. */
+export class StorefrontPages {
+  @Prop({ trim: true }) quemSomos?: string;
+  @Prop({ trim: true }) comoComprar?: string;
+  @Prop({ trim: true }) guiaMedidas?: string;
+  @Prop({ trim: true }) contato?: string;
+}
+
+/** Um lookbook "compre o look": foto + variações selecionadas, sem desconto de combo nesta v1. */
+export class StorefrontLookbook {
+  @Prop({ trim: true }) imageUrl: string;
+  @Prop({ trim: true }) title: string;
+  @Prop({ type: [String], default: [] }) variantIds: string[];
+}
+
+/** Janela de troca/devolução (Loop 8) — validada no servidor em `ReturnsService`, não só na UI. */
+export class ReturnPolicyConfig {
+  @Prop({ default: 30, min: 0 }) windowDays: number;
+  @Prop({ trim: true }) policyText?: string;
+}
+
+/** Um slide do carrossel de banners da home — imagem + link opcional pra um produto do catálogo +
+ *  título/subtítulo/CTA opcionais (cada slide pode ter os seus, ou nenhum — a imagem sozinha já
+ *  basta se a arte já carrega a mensagem). Substitui o antigo `heroLinkedProductSlug` (1 link só)
+ *  — cada slide agora tem o seu próprio destino e o seu próprio texto. */
+export class HeroBannerSlide {
+  @Prop({ trim: true, required: true }) imageUrl: string;
+  @Prop({ trim: true }) linkedProductSlug?: string;
+  @Prop({ trim: true }) title?: string;
+  @Prop({ trim: true }) subtitle?: string;
+  @Prop({ trim: true }) ctaLabel?: string;
+}
+
+export class StorefrontConfig {
+  @Prop({ default: true }) enabled: boolean;
+  @Prop({
+    type: String,
+    // Loop 12 — 'luxo' e 'streetwear' adicionados (aditivo). IDs antigos NUNCA são renomeados:
+    // tenants têm valores salvos; rótulos exibidos mudam só no front (storefrontPresets.ts).
+    enum: ['essencial', 'editorial', 'performance', 'luxo', 'boutique', 'vibrante', 'studio', 'streetwear', 'impacto', 'monocromo'],
+    default: 'essencial',
+  })
+  themePreset: string;
+  @Prop({ type: [String], default: [] }) announcements: string[];
+
+  // --- Home editorial em /catalogo (Loop 4 continuação) ---
+  @Prop({ trim: true }) heroTitle?: string;
+  @Prop({ trim: true }) heroSubtitle?: string;
+  @Prop({ trim: true }) heroImageUrl?: string;
+  /** Loop 4d — 2+ imagens vira carrossel automático no hero (qualquer preset); 0-1 mantém o
+   *  comportamento de foto única de sempre via `heroImageUrl`. */
+  @Prop({ type: [String], default: [] }) heroImages?: string[];
+  @Prop({ trim: true }) heroCtaLabel?: string;
+  /** Carrossel de banners promocionais menores/retangulares (distinto do hero estilizado por
+   *  preset acima) — cada slide tem sua própria imagem e pode linkar pra um produto diferente.
+   *  Quando configurado, `HeroBanner.tsx` renderiza este carrossel EM VEZ DO hero de
+   *  título/imagem única (os dois modos são mutuamente exclusivos, não empilhados). */
+  @Prop({ type: [HeroBannerSlide], default: [] }) heroBanners?: HeroBannerSlide[];
+  @Prop({ default: false }) showTrustBar: boolean;
+  /** Código de uma promoção já cadastrada (promotions module) — só exibição; a validação real do
+   *  cupom continua acontecendo no checkout, igual antes. */
+  @Prop({ trim: true, uppercase: true }) couponBannerCode?: string;
+  @Prop({ type: StorefrontPages, default: () => ({}) }) pages: StorefrontPages;
+  @Prop({ type: StorefrontLookbook }) lookbook?: StorefrontLookbook;
+  @Prop({ type: ReturnPolicyConfig, default: () => ({}) }) returnPolicy: ReturnPolicyConfig;
+
+  // --- SEO (Loop 10 v2) — sobrescreve o título/descrição padrão gerado a partir do nome do tenant ---
+  @Prop({ trim: true, maxlength: 70 }) metaTitle?: string;
+  @Prop({ trim: true, maxlength: 160 }) metaDescription?: string;
+}
+
+/** Regras de exibição de preço na loja pública (Loop 2 — não afeta o preço real cobrado por si só;
+ *  o desconto Pix só é aplicado quando o comprador escolhe pagar via Pix no checkout). */
+export class PricingDisplayConfig {
+  /** 0–100; 0 = sem desconto exibido/aplicado no Pix. */
+  @Prop({ default: 0, min: 0, max: 100 }) pixDiscountPercent: number;
+  /** 1–12; 1 = sem parcelamento exibido. */
+  @Prop({ default: 1, min: 1, max: 12 }) maxInstallments: number;
+}
+
+/**
+ * Pixels de conversão (Loop 15) — Meta + GA4 + TikTok juntos, por escolha explícita do usuário.
+ * Os IDs de pixel disparam eventos client-side (gated por `CookieConsentBanner`); os tokens de
+ * servidor (`metaConversionsApiToken`/`ga4ApiSecret`/`tiktokAccessToken`) são opcionais e só
+ * habilitam o evento de compra server-side a partir do webhook real da InfinitePay — sem eles,
+ * o pixel ainda funciona pra page-view/add-to-cart client-side, só perde a conversão de compra do
+ * caminho de pagamento real (a maioria das vendas, já que o checkout redireciona pra fora do site).
+ */
+export class AnalyticsConfig {
+  @Prop({ trim: true }) metaPixelId?: string;
+  @Prop({ trim: true }) metaConversionsApiToken?: string;
+  @Prop({ trim: true }) ga4MeasurementId?: string;
+  @Prop({ trim: true }) ga4ApiSecret?: string;
+  @Prop({ trim: true }) tiktokPixelId?: string;
+  @Prop({ trim: true }) tiktokAccessToken?: string;
+}
+
 export type FiscalRegime = 'simples_nacional' | 'lucro_presumido' | 'lucro_real';
 export type FiscalAmbiente = 'homologacao' | 'producao';
 
@@ -95,6 +207,18 @@ export class Tenant {
   @Prop({ type: LoyaltyConfig, default: () => ({}) })
   loyalty: LoyaltyConfig;
 
+  @Prop({ type: PricingDisplayConfig, default: () => ({}) })
+  pricingDisplay: PricingDisplayConfig;
+
+  @Prop({ type: ShippingConfig, default: () => ({}) })
+  shippingConfig: ShippingConfig;
+
+  @Prop({ type: StorefrontConfig, default: () => ({}) })
+  storefront: StorefrontConfig;
+
+  @Prop({ type: AnalyticsConfig, default: () => ({}) })
+  analytics: AnalyticsConfig;
+
   @Prop({ trim: true })
   geminiApiKey?: string;
 
@@ -109,6 +233,12 @@ export class Tenant {
 
   @Prop({ trim: true })
   metaWhatsappAccessToken?: string;
+
+  /** Loop 11-A — liga a IA (Groq via `LlmService`) pra responder automaticamente clientes que
+   *  mandam mensagem pro WhatsApp da loja (números fora da allowlist de staff). Default desligado
+   *  até o lojista configurar as credenciais Meta acima e ativar de propósito. */
+  @Prop({ default: false })
+  whatsappAiEnabled: boolean;
 
   @Prop({ type: Types.ObjectId, ref: 'User' })
   ownerUserId?: Types.ObjectId;

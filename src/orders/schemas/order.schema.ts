@@ -78,6 +78,11 @@ export class Order {
   @Prop({ type: Number, default: 0 })
   discountTotal: number;
 
+  /** Crédito de loja (`Customer.storeCreditBalance`) aplicado neste pedido (Loop 9) — dedução
+   *  final, tipo vale-presente, já deduzida atomicamente do saldo no momento do submit. */
+  @Prop({ type: Number, default: 0 })
+  creditApplied: number;
+
   @Prop({ type: [OrderLineSchema], default: [] })
   lines: Array<{
     variantId: Types.ObjectId;
@@ -98,7 +103,43 @@ export class Order {
 
   @Prop({ type: String, enum: ['pix', 'cash', 'card'] })
   paymentMethod?: 'pix' | 'cash' | 'card';
+
+  /** Marca que o e-mail "seu pedido foi enviado" já foi disparado (Loop 8) — evita reenvio se o
+   *  status voltar a passar por 'shipped' (ou for salvo de novo com o mesmo status). */
+  @Prop({ type: Date })
+  shippedNotifiedAt?: Date;
+
+  /** Rastreio real (Loop 17) — preenchido pelo staff ao marcar o pedido como enviado;
+   *  `shippingMethod` continua sendo o texto livre de método de entrega, sem relação com isto. */
+  @Prop({ trim: true })
+  carrier?: string;
+
+  @Prop({ trim: true })
+  trackingCode?: string;
+
+  @Prop({ trim: true })
+  trackingUrl?: string;
+
+  /** Local de venda (PDV offline) — ausente para pedidos sem local específico (continuam
+   *  batendo no local padrão do tenant, ver LocationsService). */
+  @Prop({ type: Types.ObjectId, ref: 'Location' })
+  locationId?: Types.ObjectId;
+
+  /** Chave de idempotência gerada no cliente (PDV offline, `POST /orders/sync-batch`) —
+   *  reenviar o mesmo lote nunca cria um pedido duplicado. Ausente para pedidos criados
+   *  pelos caminhos normais (online/admin), por isso o índice é esparso. */
+  @Prop({ trim: true })
+  clientSaleId?: string;
+
+  /** Marcado quando a sincronização converteu automaticamente parte de uma venda offline em
+   *  encomenda por falta de estoque real no local no momento do envio (ver `syncBatch`). */
+  @Prop({ type: Date })
+  autoBackorderedAt?: Date;
+
+  @Prop({ trim: true })
+  autoBackorderNote?: string;
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);
 OrderSchema.index({ tenantId: 1, createdAt: -1 });
+OrderSchema.index({ tenantId: 1, clientSaleId: 1 }, { unique: true, sparse: true });

@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { OrdersModule } from '../orders/orders.module';
+import { AnalyticsModule } from '../analytics/analytics.module';
 import { PaymentWebhookDispatcherService } from './payment-webhook-dispatcher.service';
 import { PaymentsService } from './payments.service';
 import { Payment, PaymentSchema } from './schemas/payment.schema';
@@ -15,6 +16,7 @@ import { PaymentsController } from './payments.controller';
       { name: FailedWebhook.name, schema: FailedWebhookSchema },
     ]),
     forwardRef(() => OrdersModule),
+    AnalyticsModule,
   ],
   controllers: [PublicPaymentsController, PaymentsController],
   providers: [PaymentsService, PaymentWebhookDispatcherService],

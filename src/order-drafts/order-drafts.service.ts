@@ -16,6 +16,7 @@ import { PaymentsService } from '../payments/payments.service';
 import { CustomersService } from '../customers/customers.service';
 import { ProductsService } from '../products/products.service';
 import { PromotionsService } from '../promotions/promotions.service';
+import { TenantsService } from '../tenants/tenants.service';
 import { ProductVariant } from '../products/schemas/product-variant.schema';
 import {
   ORDER_DRAFT_EXPORT_COLUMNS,
@@ -42,6 +43,7 @@ export class OrderDraftsService {
     private readonly notify: NotificationsService,
     private readonly config: ConfigService,
     private readonly excel: ExcelSpreadsheetService,
+    private readonly tenants: TenantsService,
   ) {}
 
   async createPublic(tenantId: string, dto: PublicCreateDraftDto) {
@@ -164,6 +166,7 @@ export class OrderDraftsService {
     allowWhenLocked: boolean,
     enforceStock: boolean,
     allowBackorder: boolean,
+    trustClientShipping: boolean,
   ): Promise<void> {
     this.assertDraftPatchable(doc, allowWhenLocked);
     if (dto.lines) {
@@ -177,8 +180,14 @@ export class OrderDraftsService {
     if (dto.shippingMethod !== undefined) {
       doc.shippingMethod = dto.shippingMethod;
     }
-    if (dto.shippingCost !== undefined) {
-      doc.shippingCost = dto.shippingCost;
+    if (trustClientShipping) {
+      // Staff/admin editando um rascunho manualmente pode arbitrar um valor de frete (ex.:
+      // cotação combinada por telefone) — só o comprador anônimo nunca tem esse valor aceito.
+      if (dto.shippingCost !== undefined) {
+        doc.shippingCost = dto.shippingCost;
+      }
+    } else if (dto.shippingMethod !== undefined) {
+      doc.shippingCost = await this.computeShippingCost(tenantId, dto.shippingMethod, doc.lines);
     }
     if (dto.couponCode !== undefined) {
       const code = dto.couponCode.trim();
@@ -235,6 +244,28 @@ export class OrderDraftsService {
     }
   }
 
+  /**
+   * Frete v1 (Loop 3): taxa fixa por método, isenção acima de um subtotal — nunca aceita o valor
+   * vindo do comprador (ver Decisions do spec). `pickup` é sempre grátis; a isenção incide sobre o
+   * subtotal de produtos, antes do desconto Pix (mesma base que o cupom usa).
+   */
+  private async computeShippingCost(
+    tenantId: string,
+    method: 'pickup' | 'standard' | 'express',
+    lines: OrderDraft['lines'],
+  ): Promise<number> {
+    if (method === 'pickup') return 0;
+    const tenant = await this.tenants.findById(tenantId);
+    const cfg = tenant?.shippingConfig;
+    const fee = method === 'express' ? (cfg?.expressFee ?? 39.9) : (cfg?.standardFee ?? 19.9);
+    const threshold = cfg?.freeAboveTotal;
+    if (threshold && threshold > 0) {
+      const subtotal = lines.reduce((acc, l) => acc + l.unitPrice * l.quantity, 0);
+      if (subtotal >= threshold) return 0;
+    }
+    return fee;
+  }
+
   async patchByToken(
     tenantId: string,
     token: string,
@@ -247,7 +278,7 @@ export class OrderDraftsService {
       .exec();
     if (!doc) throw new NotFoundException();
     const allowBackorder = tenantFeatures.includes('production');
-    await this.applyDraftPatch(tenantId, doc, dto as StaffPatchOrderDraftDto, false, true, allowBackorder);
+    await this.applyDraftPatch(tenantId, doc, dto as StaffPatchOrderDraftDto, false, true, allowBackorder, false);
     await doc.save();
     return doc.toObject();
   }
@@ -258,7 +289,7 @@ export class OrderDraftsService {
       .findOne({ sessionToken: t, tenantId: new Types.ObjectId(tenantId) })
       .exec();
     if (!doc) throw new NotFoundException();
-    await this.applyDraftPatch(tenantId, doc, dto, true, false, true);
+    await this.applyDraftPatch(tenantId, doc, dto, true, false, true, true);
     await doc.save();
     return doc.toObject();
   }
@@ -270,6 +301,37 @@ export class OrderDraftsService {
       .exec();
     if (!res) throw new NotFoundException();
     return { deleted: true };
+  }
+
+  private async applyPixDiscount<T extends { unitPrice: number }>(
+    tenantId: string,
+    lineInputs: T[],
+  ): Promise<T[]> {
+    const tenant = await this.tenants.findById(tenantId);
+    const pct = tenant?.pricingDisplay?.pixDiscountPercent ?? 0;
+    if (!(pct > 0)) return lineInputs;
+    const factor = 1 - pct / 100;
+    return lineInputs.map((l) => ({ ...l, unitPrice: Math.round(l.unitPrice * factor * 100) / 100 }));
+  }
+
+  /**
+   * Crédito de loja (Loop 9) — dedução final tipo vale-presente, aplicada por cima do subtotal já
+   * líquido de cupom e (se for o caso) do desconto Pix daquele branch específico. Recalcula e
+   * deduz atomicamente contra o saldo real no momento do submit (nunca confia num valor mostrado
+   * na UI minutos antes) — mesma postura de "revalidar contra o estado ao vivo" do Loop 8.
+   */
+  private async applyStoreCreditForSubmit(
+    tenantId: string,
+    customerId: string,
+    useStoreCredit: boolean | undefined,
+    lineInputsForBranch: Array<{ unitPrice: number; quantity: number }>,
+    shippingCost: number,
+    discountTotal: number,
+  ): Promise<number> {
+    if (!useStoreCredit) return 0;
+    const subtotal = lineInputsForBranch.reduce((acc, l) => acc + l.unitPrice * l.quantity, 0);
+    const totalBeforeCredit = Math.max(0, subtotal + (shippingCost ?? 0) - (discountTotal ?? 0));
+    return this.customers.applyStoreCredit(tenantId, customerId, totalBeforeCredit);
   }
 
   async submitByToken(tenantId: string, token: string, body?: PublicSubmitDraftDto) {
@@ -287,14 +349,22 @@ export class OrderDraftsService {
       const custData = (doc.metadata as any).customer;
       if (custData && custData.name) {
         const waId = doc.waId?.trim();
-        const existing = waId ? await this.customers.findByWaId(tenantId, waId) : null;
+        const email = custData.email ? String(custData.email).trim() : undefined;
+        // Dá preferência ao e-mail: é a mesma chave que o login por magic link (Loop 7) usa para
+        // resolver o Customer, então uma compra feita como convidado com um e-mail que já tem
+        // conta aparece em "meus pedidos" sem nenhuma migração/vínculo manual.
+        const existing = email
+          ? await this.customers.findByEmail(tenantId, email)
+          : waId
+            ? await this.customers.findByWaId(tenantId, waId)
+            : null;
         if (existing) {
           customerId = existing._id;
         } else {
           const newCustomer = await this.customers.create(tenantId, {
             name: String(custData.name).trim(),
             phone: custData.phone ? String(custData.phone).trim() : undefined,
-            email: custData.email ? String(custData.email).trim() : undefined,
+            email,
             whatsappWaId: waId || undefined,
           });
           customerId = newCustomer._id;
@@ -335,6 +405,19 @@ export class OrderDraftsService {
     // então o uso nunca é contado duas vezes nem pulado por um dos dois caminhos.
 
     if (body?.payment?.method === 'pix') {
+      // Preço "à vista no Pix" cobrado = preço exibido na loja (usePricingRules no web, mesma
+      // fórmula). Só incide sobre o subtotal de produtos (frete fica de fora, como a maioria das
+      // lojas BR faz) e não combina com cupom nesta v1 — evita empilhar dois descontos calculados
+      // sobre bases diferentes; a linha do cupom já foi validada contra o preço cheio no patch.
+      const pixLineInputs = doc.couponCode ? lineInputs : await this.applyPixDiscount(tenantId, lineInputs);
+      const creditApplied = await this.applyStoreCreditForSubmit(
+        tenantId,
+        String(customerId),
+        body?.useStoreCredit,
+        pixLineInputs,
+        doc.shippingCost,
+        doc.discountTotal,
+      );
       const order = await this.orders.create(
         tenantId,
         {
@@ -343,11 +426,12 @@ export class OrderDraftsService {
           status: 'open',
           reference: referenceString,
           notes: notesParts.length ? notesParts.join('\n') : undefined,
-          lines: lineInputs,
+          lines: pixLineInputs,
           shippingMethod: doc.shippingMethod,
           shippingCost: doc.shippingCost,
           couponCode: doc.couponCode,
           discountTotal: doc.discountTotal,
+          creditApplied,
         },
         undefined,
       );
@@ -377,6 +461,14 @@ export class OrderDraftsService {
     }
 
     if (body?.payment?.method === 'infinitepay') {
+      const creditApplied = await this.applyStoreCreditForSubmit(
+        tenantId,
+        String(customerId),
+        body?.useStoreCredit,
+        lineInputs,
+        doc.shippingCost,
+        doc.discountTotal,
+      );
       const order = await this.orders.create(
         tenantId,
         {
@@ -390,6 +482,7 @@ export class OrderDraftsService {
           shippingCost: doc.shippingCost,
           couponCode: doc.couponCode,
           discountTotal: doc.discountTotal,
+          creditApplied,
         },
         undefined,
       );
@@ -416,6 +509,14 @@ export class OrderDraftsService {
       };
     }
 
+    const manualCreditApplied = await this.applyStoreCreditForSubmit(
+      tenantId,
+      String(customerId),
+      body?.useStoreCredit,
+      lineInputs,
+      doc.shippingCost,
+      doc.discountTotal,
+    );
     const order = await this.orders.create(tenantId, {
       customerId: String(customerId),
       channel: 'online',
@@ -427,6 +528,7 @@ export class OrderDraftsService {
       shippingCost: doc.shippingCost,
       couponCode: doc.couponCode,
       discountTotal: doc.discountTotal,
+      creditApplied: manualCreditApplied,
     });
     doc.orderId = order._id as Types.ObjectId;
     doc.status = 'submitted';

@@ -17,6 +17,7 @@ import { ChatModule } from './chat/chat.module';
 import { ExcelModule } from './common/excel/excel.module';
 import { FiscalModule } from './fiscal/fiscal.module';
 import { CustomersModule } from './customers/customers.module';
+import { CustomerAuthModule } from './customer-auth/customer-auth.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { LeadsModule } from './leads/leads.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
@@ -24,13 +25,16 @@ import { InvoicesModule } from './invoices/invoices.module';
 import { JwtRegisteredModule } from './jwt/jwt-registered.module';
 import { LocationsModule } from './locations/locations.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { EncryptionModule } from './common/encryption.module';
 import { OrderDraftsModule } from './order-drafts/order-drafts.module';
 import { OrdersModule } from './orders/orders.module';
 import { ProductsModule } from './products/products.module';
 import { PurchasesModule } from './purchases/purchases.module';
 import { PromotionsModule } from './promotions/promotions.module';
+import { InfluencersModule } from './influencers/influencers.module';
 import { ReportsModule } from './reports/reports.module';
 import { ReturnsModule } from './returns/returns.module';
+import { ReviewsModule } from './reviews/reviews.module';
 import { SeedModule } from './seed/seed.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { UsersModule } from './users/users.module';
@@ -64,14 +68,18 @@ import { SentryContextInterceptor } from './common/interceptors/sentry-context.i
     ExcelModule,
     JwtRegisteredModule,
     NotificationsModule,
+    EncryptionModule,
     UsersModule,
     SeedModule,
     AuthModule,
     CustomersModule,
+    CustomerAuthModule,
     SuppliersModule,
     OrdersModule,
     ReturnsModule,
+    ReviewsModule,
     PromotionsModule,
+    InfluencersModule,
     PurchasesModule,
     InvoicesModule,
     ProductsModule,

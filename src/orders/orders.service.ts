@@ -24,7 +24,11 @@ import { Order } from './schemas/order.schema';
 import { ORDER_CHANNELS } from './types/order-channel';
 import type { OrderWarning } from './types/order-warning';
 import { PaymentsService } from '../payments/payments.service';
+import { Payment } from '../payments/schemas/payment.schema';
+import { Customer } from '../customers/schemas/customer.schema';
+import { NotificationsService } from '../notifications/notifications.service';
 import { escapeRegex } from '../common/utils/text-search.util';
+import { CountersService } from '../common/counters/counters.service';
 
 const STOCK_APPLIED_STATUSES = ['shipped', 'completed'] as const;
 
@@ -43,11 +47,17 @@ export class OrdersService {
     @InjectModel(Order.name) private readonly model: Model<Order>,
     @InjectModel(ProductVariant.name)
     private readonly variantModel: Model<ProductVariant>,
+    @InjectModel(Payment.name)
+    private readonly paymentModel: Model<Payment>,
+    @InjectModel(Customer.name)
+    private readonly customerModel: Model<Customer>,
     private readonly excel: ExcelSpreadsheetService,
     private readonly products: ProductsService,
     private readonly purchases: PurchasesService,
     private readonly loyalty: LoyaltyService,
     private readonly promotions: PromotionsService,
+    private readonly notifications: NotificationsService,
+    private readonly counters: CountersService,
     @Inject(forwardRef(() => PaymentsService))
     private readonly payments: any,
   ) {}
@@ -259,7 +269,10 @@ export class OrdersService {
     }
     const shippingCost = dto.shippingCost ?? 0;
     const discountTotal = dto.discountTotal ?? 0;
-    total = Math.max(0, total + shippingCost - discountTotal);
+    // Crédito de loja (Loop 9) é uma dedução final, tipo vale-presente — nunca mexe no cálculo do
+    // cupom/desconto Pix, só subtrai por cima do total já composto por eles.
+    const creditApplied = dto.creditApplied ?? 0;
+    total = Math.max(0, total + shippingCost - discountTotal - creditApplied);
 
     // Confirma o cupom de forma atômica antes de criar o pedido — único chokepoint de
     // redenção (usado tanto pela criação direta no admin/PDV quanto pelo submit de
@@ -274,7 +287,7 @@ export class OrdersService {
       await this.assertStockSufficientForPay(tenantId, lines);
     }
 
-    const nextNumber = (await this.model.countDocuments({ tenantId: new Types.ObjectId(tenantId) }).exec()) + 1;
+    const nextNumber = await this.counters.next(tenantId, 'order');
 
     const created = await this.model.create({
       tenantId: new Types.ObjectId(tenantId),
@@ -290,12 +303,17 @@ export class OrdersService {
       shippingCost,
       couponCode: dto.couponCode,
       discountTotal,
+      creditApplied,
       createdBy: createdBy ? new Types.ObjectId(createdBy) : undefined,
       operatorUserId:
         dto.operatorUserId && Types.ObjectId.isValid(dto.operatorUserId)
           ? new Types.ObjectId(dto.operatorUserId)
           : undefined,
       paymentMethod: dto.paymentMethod,
+      locationId:
+        dto.locationId && Types.ObjectId.isValid(dto.locationId)
+          ? new Types.ObjectId(dto.locationId)
+          : undefined,
     });
 
     const oid = created._id as Types.ObjectId;
@@ -307,6 +325,7 @@ export class OrdersService {
           stockLines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
           createdBy,
           tenantId,
+          dto.locationId,
         );
       } catch (e) {
         // Atomic decrement lost the race (concurrent sale took the last unit) —
@@ -324,6 +343,191 @@ export class OrdersService {
       created.toObject() as unknown as Record<string, unknown>,
       warnings,
     );
+  }
+
+  /**
+   * Ingests a batch of offline PDV sales idempotently. Never blocks on insufficient stock:
+   * per line, reserves as much as the location (and tenant total) actually have via
+   * `ProductsService.reserveForOfflineSale`, and auto-converts any shortfall into a
+   * backorder line (`isOrder: true`) — the exact mechanism already used for manual
+   * encomendas, just triggered automatically here. Replaying the same `clientSaleId` (e.g.
+   * a PDV retry after a dropped response) is a pure no-op: it returns the order that already
+   * exists instead of creating a duplicate or re-touching stock.
+   */
+  async syncBatch(
+    tenantId: string,
+    locationId: string | undefined,
+    sales: Array<{
+      clientSaleId: string;
+      customerId: string;
+      paymentMethod: 'pix' | 'cash' | 'card';
+      notes?: string;
+      lines: OrderLineInputDto[];
+    }>,
+    createdBy?: string,
+  ): Promise<
+    Array<{
+      clientSaleId: string;
+      orderId: string;
+      orderNumber: number;
+      status: 'ok' | 'partial_backorder';
+      downgradedLines?: Array<{ variantId: string; requested: number; fulfilled: number }>;
+    }>
+  > {
+    const results: Array<{
+      clientSaleId: string;
+      orderId: string;
+      orderNumber: number;
+      status: 'ok' | 'partial_backorder';
+      downgradedLines?: Array<{ variantId: string; requested: number; fulfilled: number }>;
+    }> = [];
+    for (const sale of sales) {
+      results.push(await this.syncOneOfflineSale(tenantId, locationId, sale, createdBy));
+    }
+    return results;
+  }
+
+  private async syncOneOfflineSale(
+    tenantId: string,
+    locationId: string | undefined,
+    sale: {
+      clientSaleId: string;
+      customerId: string;
+      paymentMethod: 'pix' | 'cash' | 'card';
+      notes?: string;
+      lines: OrderLineInputDto[];
+    },
+    createdBy?: string,
+  ): Promise<{
+    clientSaleId: string;
+    orderId: string;
+    orderNumber: number;
+    status: 'ok' | 'partial_backorder';
+    downgradedLines?: Array<{ variantId: string; requested: number; fulfilled: number }>;
+  }> {
+    const tid = new Types.ObjectId(tenantId);
+
+    const existing = await this.model
+      .findOne({ tenantId: tid, clientSaleId: sale.clientSaleId })
+      .lean()
+      .exec();
+    if (existing) {
+      return {
+        clientSaleId: sale.clientSaleId,
+        orderId: String(existing._id),
+        orderNumber: existing.number,
+        status: existing.autoBackorderedAt ? 'partial_backorder' : 'ok',
+      };
+    }
+
+    const { lines: resolvedLines, total } = await this.resolveLines(tenantId, sale.lines);
+    this.assertLinesRequiredForStatus('completed', resolvedLines);
+
+    const oid = new Types.ObjectId();
+    const finalLines: Order['lines'] = [];
+    const downgradedLines: Array<{ variantId: string; requested: number; fulfilled: number }> = [];
+
+    for (const line of resolvedLines) {
+      if (line.isOrder) {
+        // Already an explicit encomenda from the PDV itself — never touches stock, same as
+        // every other order-creation path.
+        finalLines.push(line);
+        continue;
+      }
+      const fulfilled = await this.products.reserveForOfflineSale(
+        tenantId,
+        String(line.variantId),
+        locationId,
+        line.quantity,
+        oid,
+        createdBy,
+      );
+      if (fulfilled >= line.quantity) {
+        finalLines.push(line);
+        continue;
+      }
+      downgradedLines.push({ variantId: String(line.variantId), requested: line.quantity, fulfilled });
+      if (fulfilled > 0) {
+        finalLines.push({ ...line, quantity: fulfilled });
+      }
+      finalLines.push({ ...line, quantity: line.quantity - fulfilled, isOrder: true });
+    }
+
+    const status = downgradedLines.length || finalLines.some((l) => l.isOrder) ? 'open' : 'completed';
+
+    let created;
+    try {
+      created = await this.model.create({
+        _id: oid,
+        tenantId: tid,
+        customerId: new Types.ObjectId(sale.customerId),
+        number: await this.counters.next(tenantId, 'order'),
+        channel: 'in_person',
+        status,
+        total,
+        notes: sale.notes,
+        lines: finalLines,
+        paymentMethod: sale.paymentMethod,
+        locationId: locationId && Types.ObjectId.isValid(locationId) ? new Types.ObjectId(locationId) : undefined,
+        clientSaleId: sale.clientSaleId,
+        createdBy: createdBy ? new Types.ObjectId(createdBy) : undefined,
+        autoBackorderedAt: downgradedLines.length ? new Date() : undefined,
+        autoBackorderNote: downgradedLines.length
+          ? `Sincronização converteu ${downgradedLines.length} linha(s) em encomenda por falta de estoque no local no momento do envio.`
+          : undefined,
+      });
+    } catch (e: any) {
+      if (e?.code === 11000) {
+        // Lost a race against a concurrent replay of the same clientSaleId — this attempt's
+        // reservations are the loser and must be reversed; the order that actually won is
+        // the source of truth to report back.
+        const touchedVariants = new Set(finalLines.filter((l) => !l.isOrder).map((l) => String(l.variantId)));
+        for (const vid of touchedVariants) {
+          await this.products
+            .applySaleReversalForOrderVariant(oid, vid, createdBy, tenantId, locationId)
+            .catch(() => undefined);
+        }
+        const winner = await this.model
+          .findOne({ tenantId: tid, clientSaleId: sale.clientSaleId })
+          .lean()
+          .exec();
+        if (winner) {
+          return {
+            clientSaleId: sale.clientSaleId,
+            orderId: String(winner._id),
+            orderNumber: winner.number,
+            status: winner.autoBackorderedAt ? 'partial_backorder' : 'ok',
+          };
+        }
+      }
+      throw e;
+    }
+
+    if (status === 'completed') {
+      await this.loyalty.creditForOrder(tenantId, created.customerId, total);
+    }
+
+    if (downgradedLines.length) {
+      const subject = `[LM FIT] Venda offline ajustada na sincronização (pedido ${created.number})`;
+      const text = `A sincronização do PDV converteu ${downgradedLines.length} linha(s) em encomenda por falta de estoque no local no momento do envio.\nPedido: ${created.number} (${String(created._id)})\nLinhas afetadas: ${downgradedLines
+        .map((l) => `variante ${l.variantId} (pedido ${l.requested}, disponível ${l.fulfilled})`)
+        .join('; ')}`;
+      await this.notifications.sendStaffEmail(subject, text).catch(() => undefined);
+      this.notifications.logStaffAlert('offline_sale_auto_backordered', {
+        orderId: String(created._id),
+        orderNumber: created.number,
+        clientSaleId: sale.clientSaleId,
+        downgradedLines,
+      });
+    }
+
+    return {
+      clientSaleId: sale.clientSaleId,
+      orderId: String(created._id),
+      orderNumber: created.number,
+      status: downgradedLines.length ? 'partial_backorder' : 'ok',
+      downgradedLines: downgradedLines.length ? downgradedLines : undefined,
+    };
   }
 
   private listFilter(tenantId: string, search?: string, channel?: string) {
@@ -361,6 +565,54 @@ export class OrdersService {
       this.model.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       this.model.countDocuments(q).exec(),
     ]);
+    return { items, total, page, limit };
+  }
+
+  /** Projeção segura para o cliente logado em `/me/orders` — sem campos internos (createdBy, operatorUserId, notes). */
+  async findAllForCustomer(tenantId: string, customerId: string, page: number, limit: number) {
+    if (!Types.ObjectId.isValid(customerId)) return { items: [], total: 0, page, limit };
+    const skip = skipFromPage(page, limit);
+    const q = { tenantId: new Types.ObjectId(tenantId), customerId: new Types.ObjectId(customerId) };
+    const [orders, total] = await Promise.all([
+      this.model
+        .find(q)
+        .select('customerId number status total shippingMethod shippingCost carrier trackingCode trackingUrl lines createdAt')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean()
+        .exec(),
+      this.model.countDocuments(q).exec(),
+    ]);
+
+    const orderIds = orders.map((o) => o._id);
+    const payments = orderIds.length
+      ? await this.paymentModel
+          .find({ tenantId: new Types.ObjectId(tenantId), orderId: { $in: orderIds } })
+          .select('orderId status method')
+          .lean()
+          .exec()
+      : [];
+    const paymentByOrderId = new Map(payments.map((p) => [String(p.orderId), p]));
+
+    const items = orders.map((o) => {
+      const payment = paymentByOrderId.get(String(o._id));
+      return {
+        id: String(o._id),
+        number: o.number,
+        status: o.status,
+        total: o.total,
+        shippingMethod: o.shippingMethod ?? null,
+        shippingCost: o.shippingCost,
+        carrier: o.carrier ?? null,
+        trackingCode: o.trackingCode ?? null,
+        trackingUrl: o.trackingUrl ?? null,
+        lines: o.lines,
+        createdAt: (o as unknown as { createdAt: Date }).createdAt,
+        payment: payment ? { status: payment.status, method: payment.method } : null,
+      };
+    });
+
     return { items, total, page, limit };
   }
 
@@ -634,18 +886,27 @@ export class OrdersService {
 
     const warnings = await this.buildWarnings(tenantId, lines);
 
-    const wasApplied = isStockAppliedStatus(oldStatus);
+    // A syncBatch order (PDV offline, `clientSaleId` set) already deducted stock for its
+    // non-backorder lines at sync time even though it can land on 'open' (one line became a
+    // backorder) — `isStockAppliedStatus` alone doesn't know that, and would otherwise treat
+    // a later transition off `open` as "stock was never applied", causing it to skip the
+    // reversal on cancel or to re-run the (idempotent, but pointless) deduction on complete.
+    const wasApplied = isStockAppliedStatus(oldStatus) || !!existing.clientSaleId;
     const willApply = isStockAppliedStatus(newStatus);
 
     if (!wasApplied && willApply) {
       await this.assertStockSufficientForPay(tenantId, lines);
     }
 
+    const existingLocationId = existing.locationId ? String(existing.locationId) : undefined;
+
     if (wasApplied && !willApply) {
       await this.products.applySaleReversalsForOrder(
         existing._id as Types.ObjectId,
         lines.map((l) => ({ variantId: l.variantId })),
         createdBy,
+        tenantId,
+        existingLocationId,
       );
     }
 
@@ -656,6 +917,7 @@ export class OrdersService {
         stockLines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
         createdBy,
         tenantId,
+        existingLocationId,
       );
     }
 
@@ -672,6 +934,18 @@ export class OrdersService {
     if (dto.paymentMethod !== undefined) {
       existing.paymentMethod = dto.paymentMethod;
     }
+    if (dto.carrier !== undefined) existing.carrier = dto.carrier;
+    if (dto.trackingCode !== undefined) existing.trackingCode = dto.trackingCode;
+    if (dto.trackingUrl !== undefined) existing.trackingUrl = dto.trackingUrl;
+    // Idempotência: só dispara o e-mail "pedido enviado" na PRIMEIRA transição para 'shipped' —
+    // `shippedNotifiedAt` uma vez setado nunca é limpo, então uma segunda PATCH para 'shipped'
+    // (ou qualquer outra mudança de status depois) nunca reenvia (mesmo padrão de guarda
+    // `oldStatus !== newStatus` já usado abaixo para 'completed'/loyalty).
+    const shouldNotifyShipped = oldStatus !== 'shipped' && newStatus === 'shipped' && !existing.shippedNotifiedAt;
+    if (shouldNotifyShipped) {
+      existing.shippedNotifiedAt = new Date();
+    }
+
     existing.lines = lines;
     existing.total = total;
     await existing.save();
@@ -689,9 +963,30 @@ export class OrdersService {
     ) {
       await this.payments.cancelPendingForOrder(tenantId, existing._id as Types.ObjectId);
     }
+    if (shouldNotifyShipped) {
+      await this.notifyOrderShipped(tenantId, existing.customerId, existing.number);
+    }
 
     const lean = existing.toObject();
     return this.toResponse(lean as unknown as Record<string, unknown>, warnings);
+  }
+
+  private async notifyOrderShipped(tenantId: string, customerId: Types.ObjectId, orderNumber: number) {
+    const customer = await this.customerModel
+      .findOne({ _id: customerId, tenantId: new Types.ObjectId(tenantId) })
+      .lean()
+      .exec();
+    if (!customer?.email) return;
+    try {
+      await this.notifications.sendEmail(
+        customer.email,
+        `Seu pedido #${orderNumber} foi enviado`,
+        `Boas notícias! Seu pedido #${orderNumber} já está a caminho.`,
+      );
+    } catch {
+      // Falha de entrega é uma preocupação de infraestrutura separada — mesma postura do Loop 7
+      // (magic link) e do Loop 8 (aprovação/rejeição de devolução): não bloqueia a transição de status.
+    }
   }
 
   async remove(tenantId: string, id: string) {
@@ -701,7 +996,13 @@ export class OrdersService {
     if (doc.status === 'open') {
       await this.payments.cancelPendingForOrder(tenantId, doc._id as Types.ObjectId);
     }
-    if (isStockAppliedStatus(doc.status) && (doc.lines?.length ?? 0) > 0) {
+    // A syncBatch order (PDV offline, `clientSaleId` set) deducts stock for its non-backorder
+    // lines the moment it's synced, regardless of the resulting status — unlike a normal
+    // draft, an "open" synced order (open only because one line became a backorder) still
+    // has real stock already applied for the rest. `isStockAppliedStatus` alone would miss
+    // that and silently skip the reversal below.
+    const stockWasApplied = isStockAppliedStatus(doc.status) || !!doc.clientSaleId;
+    if (stockWasApplied && (doc.lines?.length ?? 0) > 0) {
       const stockLines = (doc.lines ?? []).filter(l => !(l as any).isOrder);
       if (stockLines.length > 0) {
         await this.products.applySaleReversalsForOrder(
@@ -709,6 +1010,7 @@ export class OrdersService {
           stockLines.map((l) => ({ variantId: l.variantId })),
           undefined,
           tenantId,
+          doc.locationId ? String(doc.locationId) : undefined,
         );
       }
     }

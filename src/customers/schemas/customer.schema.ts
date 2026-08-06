@@ -56,6 +56,10 @@ export class Customer {
   @Prop({ type: Boolean, default: false })
   walkIn: boolean;
 
+  /** Lista de desejos — IDs de Product salvos pelo cliente na loja. */
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Product' }], default: [] })
+  wishlist: Types.ObjectId[];
+
   @Prop({ type: Types.ObjectId, ref: 'User' })
   createdBy?: Types.ObjectId;
 }

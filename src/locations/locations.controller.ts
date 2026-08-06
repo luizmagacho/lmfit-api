@@ -1,14 +1,16 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { TenantId } from '../common/decorators/tenant-id.decorator';
 import { Audited } from '../audit/audited.decorator';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { LocationsService } from './locations.service';
 import { CreateLocationDto } from './dto/create-location.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { TransferStockDto } from './dto/transfer-stock.dto';
+import { AllocateStockDto } from './dto/allocate-stock.dto';
 
 @ApiTags('locations')
 @ApiBearerAuth()
@@ -35,9 +37,24 @@ export class LocationsController {
     return this.locations.transfer(tenantId, dto);
   }
 
+  @Post('allocate')
+  @Audited('locations.allocate')
+  allocate(@TenantId() tenantId: string, @Body() dto: AllocateStockDto) {
+    return this.locations.allocate(tenantId, dto);
+  }
+
   @Get('stock/:variantId')
   stockByVariant(@TenantId() tenantId: string, @Param('variantId') variantId: string) {
     return this.locations.listByVariant(tenantId, variantId);
+  }
+
+  @Get(':id/stock')
+  stockByLocation(
+    @TenantId() tenantId: string,
+    @Param('id') id: string,
+    @Query() q: PaginationQueryDto,
+  ) {
+    return this.locations.stockByLocation(tenantId, id, q.page, q.limit);
   }
 
   @Get(':id')

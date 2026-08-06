@@ -55,4 +55,9 @@ export class CreatePromotionDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  @ApiPropertyOptional({ description: 'Influenciador dono deste cupom (Programa de Influenciadores)' })
+  @IsOptional()
+  @IsString()
+  influencerId?: string;
 }

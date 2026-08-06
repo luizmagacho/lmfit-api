@@ -18,6 +18,17 @@ import type { CreateCustomerDto } from './dto/create-customer.dto';
 import type { UpdateCustomerDto } from './dto/update-customer.dto';
 import { Customer, type CustomerDocument } from './schemas/customer.schema';
 
+type AddressFields = {
+  label?: string;
+  cep: string;
+  logradouro: string;
+  numero?: string;
+  complemento?: string;
+  bairro: string;
+  cidade: string;
+  uf: string;
+};
+
 @Injectable()
 export class CustomersService {
   constructor(
@@ -277,12 +288,173 @@ export class CustomersService {
     };
   }
 
+  /**
+   * Deduz até `maxAmount` do saldo de crédito de loja do cliente, atomicamente (Loop 9) — nunca
+   * deduz mais do que o saldo real no momento da escrita, mesmo que `maxAmount` tenha sido
+   * calculado contra um saldo já levemente desatualizado. Retorna o valor efetivamente deduzido
+   * (0 se o cliente não existir ou não tiver saldo).
+   */
+  async applyStoreCredit(tenantId: string, customerId: string, maxAmount: number): Promise<number> {
+    if (maxAmount <= 0 || !Types.ObjectId.isValid(customerId)) return 0;
+    const customer = await this.model
+      .findOne({ _id: customerId, tenantId: new Types.ObjectId(tenantId) })
+      .lean()
+      .exec();
+    if (!customer) return 0;
+    const creditApplied = Math.min(customer.storeCreditBalance ?? 0, maxAmount);
+    if (creditApplied <= 0) return 0;
+    const updated = await this.model
+      .findOneAndUpdate(
+        {
+          _id: customerId,
+          tenantId: new Types.ObjectId(tenantId),
+          storeCreditBalance: { $gte: creditApplied },
+        },
+        { $inc: { storeCreditBalance: -creditApplied } },
+      )
+      .exec();
+    return updated ? creditApplied : 0;
+  }
+
   async findByWaId(tenantId: string, waId: string) {
     const doc = await this.model
       .findOne({ tenantId: new Types.ObjectId(tenantId), whatsappWaId: waId.trim() })
       .lean()
       .exec();
     return doc;
+  }
+
+  async findByEmail(tenantId: string, email: string) {
+    const doc = await this.model
+      .findOne({ tenantId: new Types.ObjectId(tenantId), email: email.trim().toLowerCase() })
+      .lean()
+      .exec();
+    return doc;
+  }
+
+  /** Encontra por e-mail ou cria um cadastro mínimo — usado pelo login por magic link. */
+  async findOrCreateByEmail(tenantId: string, email: string, name?: string) {
+    const normalized = email.trim().toLowerCase();
+    const existing = await this.findByEmail(tenantId, normalized);
+    if (existing) return existing;
+    return this.create(tenantId, {
+      name: name?.trim() || normalized.split('@')[0],
+      email: normalized,
+    });
+  }
+
+  async listAddresses(tenantId: string, customerId: string) {
+    if (!Types.ObjectId.isValid(customerId)) throw new NotFoundException();
+    const doc = await this.model
+      .findOne({ _id: new Types.ObjectId(customerId), tenantId: new Types.ObjectId(tenantId) })
+      .select('addresses')
+      .lean()
+      .exec();
+    if (!doc) throw new NotFoundException();
+    return doc.addresses ?? [];
+  }
+
+  async addAddress(tenantId: string, customerId: string, dto: AddressFields) {
+    if (!Types.ObjectId.isValid(customerId)) throw new NotFoundException();
+    const doc = await this.model
+      .findOneAndUpdate(
+        { _id: new Types.ObjectId(customerId), tenantId: new Types.ObjectId(tenantId) },
+        { $push: { addresses: dto } },
+        { new: true },
+      )
+      .select('addresses')
+      .lean()
+      .exec();
+    if (!doc) throw new NotFoundException();
+    return doc.addresses ?? [];
+  }
+
+  async updateAddress(
+    tenantId: string,
+    customerId: string,
+    addressId: string,
+    dto: Partial<AddressFields>,
+  ) {
+    if (!Types.ObjectId.isValid(customerId) || !Types.ObjectId.isValid(addressId)) {
+      throw new NotFoundException();
+    }
+    const set: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(dto)) {
+      if (v !== undefined) set[`addresses.$[elem].${k}`] = v;
+    }
+    const doc = await this.model
+      .findOneAndUpdate(
+        { _id: new Types.ObjectId(customerId), tenantId: new Types.ObjectId(tenantId) },
+        { $set: set },
+        { new: true, arrayFilters: [{ 'elem._id': new Types.ObjectId(addressId) }] },
+      )
+      .select('addresses')
+      .lean()
+      .exec();
+    if (!doc) throw new NotFoundException();
+    return doc.addresses ?? [];
+  }
+
+  async removeAddress(tenantId: string, customerId: string, addressId: string) {
+    if (!Types.ObjectId.isValid(customerId) || !Types.ObjectId.isValid(addressId)) {
+      throw new NotFoundException();
+    }
+    const doc = await this.model
+      .findOneAndUpdate(
+        { _id: new Types.ObjectId(customerId), tenantId: new Types.ObjectId(tenantId) },
+        { $pull: { addresses: { _id: new Types.ObjectId(addressId) } } },
+        { new: true },
+      )
+      .select('addresses')
+      .lean()
+      .exec();
+    if (!doc) throw new NotFoundException();
+    return doc.addresses ?? [];
+  }
+
+  async getWishlistProductIds(tenantId: string, customerId: string): Promise<string[]> {
+    if (!Types.ObjectId.isValid(customerId)) throw new NotFoundException();
+    const doc = await this.model
+      .findOne({ _id: new Types.ObjectId(customerId), tenantId: new Types.ObjectId(tenantId) })
+      .select('wishlist')
+      .lean()
+      .exec();
+    if (!doc) throw new NotFoundException();
+    return (doc.wishlist ?? []).map((id) => String(id));
+  }
+
+  async addToWishlist(tenantId: string, customerId: string, productId: string): Promise<string[]> {
+    if (!Types.ObjectId.isValid(customerId) || !Types.ObjectId.isValid(productId)) {
+      throw new NotFoundException();
+    }
+    const doc = await this.model
+      .findOneAndUpdate(
+        { _id: new Types.ObjectId(customerId), tenantId: new Types.ObjectId(tenantId) },
+        { $addToSet: { wishlist: new Types.ObjectId(productId) } },
+        { new: true },
+      )
+      .select('wishlist')
+      .lean()
+      .exec();
+    if (!doc) throw new NotFoundException();
+    return (doc.wishlist ?? []).map((id) => String(id));
+  }
+
+  async removeFromWishlist(tenantId: string, customerId: string, productId: string): Promise<string[]> {
+    if (!Types.ObjectId.isValid(customerId) || !Types.ObjectId.isValid(productId)) {
+      throw new NotFoundException();
+    }
+    const doc = await this.model
+      .findOneAndUpdate(
+        { _id: new Types.ObjectId(customerId), tenantId: new Types.ObjectId(tenantId) },
+        { $pull: { wishlist: new Types.ObjectId(productId) } },
+        { new: true },
+      )
+      .select('wishlist')
+      .lean()
+      .exec();
+    if (!doc) throw new NotFoundException();
+    return (doc.wishlist ?? []).map((id) => String(id));
   }
 
   /** Fuzzy match for Gemini hints (first match). */

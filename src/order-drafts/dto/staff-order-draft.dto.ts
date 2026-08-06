@@ -25,10 +25,10 @@ export class StaffPatchOrderDraftDto {
   @IsString()
   paymentMethodChoice?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ enum: ['pickup', 'standard', 'express'] })
   @IsOptional()
-  @IsString()
-  shippingMethod?: string;
+  @IsEnum(['pickup', 'standard', 'express'])
+  shippingMethod?: 'pickup' | 'standard' | 'express';
 
   @ApiPropertyOptional()
   @IsOptional()

@@ -72,6 +72,11 @@ export class OrderDraft {
 
   @Prop({ type: MSchema.Types.Mixed })
   metadata?: Record<string, unknown>;
+
+  /** Loop 16 — marca que o e-mail de carrinho abandonado já foi processado pra este rascunho (enviado
+   *  ou pulado por falta de e-mail), pra nunca reprocessar o mesmo rascunho duas vezes. */
+  @Prop({ type: Date })
+  abandonedNotifiedAt?: Date;
 }
 
 export const OrderDraftSchema = SchemaFactory.createForClass(OrderDraft);

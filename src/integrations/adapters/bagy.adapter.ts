@@ -13,6 +13,8 @@ import {
 @Injectable()
 export class BagyAdapter implements PlatformAdapter {
   readonly platform = 'bagy';
+  /** Nome de header best-guess — Bagy não documenta publicamente o nome exato; validar contra uma loja real antes de confiar em produção. */
+  readonly webhookSignatureHeader = 'x-bagy-hmac-sha256';
   private readonly logger = new Logger(BagyAdapter.name);
   private readonly baseUrl = 'https://api.dooca.store';
 

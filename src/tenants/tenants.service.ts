@@ -6,11 +6,16 @@ import type { CreateTenantDto } from './dto/create-tenant.dto';
 import type { UpdateBrandingDto } from './dto/update-branding.dto';
 import type { UpdateFiscalConfigDto } from './dto/update-fiscal-config.dto';
 import type { UpdateLoyaltyConfigDto } from './dto/update-loyalty-config.dto';
+import type { UpdatePricingDisplayDto } from './dto/update-pricing-display.dto';
+import type { UpdateShippingConfigDto } from './dto/update-shipping-config.dto';
+import type { UpdateAnalyticsConfigDto } from './dto/update-analytics-config.dto';
+import type { UpdateStorefrontConfigDto } from './dto/update-storefront-config.dto';
 import type { UpdateTenantDto } from './dto/update-tenant.dto';
 import { Tenant, type TenantDocument, type TenantPlan } from './schemas/tenant.schema';
 import { TenantRequest, type TenantRequestDocument } from './schemas/tenant-request.schema';
 import type { CreateTenantRequestDto } from './dto/create-tenant-request.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { EncryptionService } from '../common/encryption.service';
 import { escapeRegex } from '../common/utils/text-search.util';
 
 /* ------------------------------------------------------------------ */
@@ -66,7 +71,14 @@ export class TenantsService {
     @InjectModel(Tenant.name) private readonly tenantModel: Model<Tenant>,
     @InjectModel(TenantRequest.name) private readonly tenantRequestModel: Model<TenantRequest>,
     private readonly notifications: NotificationsService,
+    private readonly encryption: EncryptionService,
   ) {}
+
+  /** Loop 18 — só criptografa quando há de fato um valor pra proteger, nunca chama encrypt(null);
+   *  usado tanto por `updateAnalyticsConfig` quanto por `updateBranding` (Loop 11-A). */
+  private encryptOrClear(value: string | null | undefined): string | null | undefined {
+    return value ? this.encryption.encrypt(value) : value;
+  }
 
   /* ----- slug-based lookup with cache ----- */
 
@@ -154,10 +166,17 @@ export class TenantsService {
     if (dto.infinitePayTag !== undefined) setFields['infinitePayTag'] = dto.infinitePayTag;
     if (dto.infinitePayApiKey !== undefined) setFields['infinitePayApiKey'] = dto.infinitePayApiKey;
     if (dto.geminiApiKey !== undefined) setFields['geminiApiKey'] = dto.geminiApiKey;
-    if (dto.metaAppSecret !== undefined) setFields['metaAppSecret'] = dto.metaAppSecret;
-    if (dto.metaWhatsappVerifyToken !== undefined) setFields['metaWhatsappVerifyToken'] = dto.metaWhatsappVerifyToken;
+    // Loop 11-A — mesmo tratamento do Loop 18 pros tokens de analytics: só criptografa quando há
+    // valor de fato (nunca chama encrypt(null)), pra permitir limpar o campo mandando null/"".
+    if (dto.metaAppSecret !== undefined) setFields['metaAppSecret'] = this.encryptOrClear(dto.metaAppSecret);
+    if (dto.metaWhatsappVerifyToken !== undefined) {
+      setFields['metaWhatsappVerifyToken'] = this.encryptOrClear(dto.metaWhatsappVerifyToken);
+    }
     if (dto.metaWhatsappPhoneNumberId !== undefined) setFields['metaWhatsappPhoneNumberId'] = dto.metaWhatsappPhoneNumberId;
-    if (dto.metaWhatsappAccessToken !== undefined) setFields['metaWhatsappAccessToken'] = dto.metaWhatsappAccessToken;
+    if (dto.metaWhatsappAccessToken !== undefined) {
+      setFields['metaWhatsappAccessToken'] = this.encryptOrClear(dto.metaWhatsappAccessToken);
+    }
+    if (dto.whatsappAiEnabled !== undefined) setFields['whatsappAiEnabled'] = dto.whatsappAiEnabled;
 
     const doc = await this.tenantModel
       .findByIdAndUpdate(id, { $set: setFields }, { new: true })
@@ -204,6 +223,120 @@ export class TenantsService {
       .findByIdAndUpdate(id, { $set: setFields }, { new: true })
       .exec();
     if (!doc) throw new NotFoundException();
+    return doc;
+  }
+
+  /* ----- update pricing display rules only ----- */
+
+  async updatePricingDisplay(id: string, dto: UpdatePricingDisplayDto): Promise<TenantDocument> {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
+
+    const setFields: Record<string, unknown> = {};
+    if (dto.pixDiscountPercent !== undefined) setFields['pricingDisplay.pixDiscountPercent'] = dto.pixDiscountPercent;
+    if (dto.maxInstallments !== undefined) setFields['pricingDisplay.maxInstallments'] = dto.maxInstallments;
+
+    const doc = await this.tenantModel
+      .findByIdAndUpdate(id, { $set: setFields }, { new: true })
+      .exec();
+    if (!doc) throw new NotFoundException();
+
+    // Sem isso, o storefront público continua servindo a regra antiga de findBySlug's cache
+    // (TTL de 5min) até expirar sozinho — mesmo problema que updateBranding já resolve.
+    this.slugCache.delete(doc.slug);
+    return doc;
+  }
+
+  /* ----- update shipping config only ----- */
+
+  async updateShippingConfig(id: string, dto: UpdateShippingConfigDto): Promise<TenantDocument> {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
+
+    const setFields: Record<string, unknown> = {};
+    if (dto.pickupLabel !== undefined) setFields['shippingConfig.pickupLabel'] = dto.pickupLabel;
+    if (dto.standardFee !== undefined) setFields['shippingConfig.standardFee'] = dto.standardFee;
+    if (dto.expressFee !== undefined) setFields['shippingConfig.expressFee'] = dto.expressFee;
+    if (dto.freeAboveTotal !== undefined) setFields['shippingConfig.freeAboveTotal'] = dto.freeAboveTotal;
+
+    const doc = await this.tenantModel
+      .findByIdAndUpdate(id, { $set: setFields }, { new: true })
+      .exec();
+    if (!doc) throw new NotFoundException();
+
+    this.slugCache.delete(doc.slug);
+    return doc;
+  }
+
+  /* ----- update analytics/pixels config only ----- */
+
+  async updateAnalyticsConfig(id: string, dto: UpdateAnalyticsConfigDto): Promise<TenantDocument> {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
+
+    // Loop 18 — os 3 tokens de servidor (nunca os IDs de pixel, que são públicos por natureza) são
+    // criptografados antes de salvar; `AnalyticsService.trackPurchase` descriptografa na leitura.
+    const setFields: Record<string, unknown> = {};
+    if (dto.metaPixelId !== undefined) setFields['analytics.metaPixelId'] = dto.metaPixelId;
+    if (dto.metaConversionsApiToken !== undefined) {
+      setFields['analytics.metaConversionsApiToken'] = this.encryptOrClear(dto.metaConversionsApiToken);
+    }
+    if (dto.ga4MeasurementId !== undefined) setFields['analytics.ga4MeasurementId'] = dto.ga4MeasurementId;
+    if (dto.ga4ApiSecret !== undefined) {
+      setFields['analytics.ga4ApiSecret'] = this.encryptOrClear(dto.ga4ApiSecret);
+    }
+    if (dto.tiktokPixelId !== undefined) setFields['analytics.tiktokPixelId'] = dto.tiktokPixelId;
+    if (dto.tiktokAccessToken !== undefined) {
+      setFields['analytics.tiktokAccessToken'] = this.encryptOrClear(dto.tiktokAccessToken);
+    }
+
+    const doc = await this.tenantModel
+      .findByIdAndUpdate(id, { $set: setFields }, { new: true })
+      .exec();
+    if (!doc) throw new NotFoundException();
+
+    this.slugCache.delete(doc.slug);
+    return doc;
+  }
+
+  /* ----- update storefront brand-layer config only ----- */
+
+  async updateStorefrontConfig(id: string, dto: UpdateStorefrontConfigDto): Promise<TenantDocument> {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
+
+    const setFields: Record<string, unknown> = {};
+    if (dto.enabled !== undefined) setFields['storefront.enabled'] = dto.enabled;
+    if (dto.themePreset !== undefined) setFields['storefront.themePreset'] = dto.themePreset;
+    if (dto.announcements !== undefined) setFields['storefront.announcements'] = dto.announcements;
+    if (dto.heroTitle !== undefined) setFields['storefront.heroTitle'] = dto.heroTitle;
+    if (dto.heroSubtitle !== undefined) setFields['storefront.heroSubtitle'] = dto.heroSubtitle;
+    if (dto.heroImageUrl !== undefined) setFields['storefront.heroImageUrl'] = dto.heroImageUrl;
+    if (dto.heroImages !== undefined) setFields['storefront.heroImages'] = dto.heroImages;
+    if (dto.heroCtaLabel !== undefined) setFields['storefront.heroCtaLabel'] = dto.heroCtaLabel;
+    if (dto.heroBanners !== undefined) setFields['storefront.heroBanners'] = dto.heroBanners;
+    if (dto.showTrustBar !== undefined) setFields['storefront.showTrustBar'] = dto.showTrustBar;
+    if (dto.couponBannerCode !== undefined) setFields['storefront.couponBannerCode'] = dto.couponBannerCode;
+    if (dto.pages !== undefined) {
+      if (dto.pages.quemSomos !== undefined) setFields['storefront.pages.quemSomos'] = dto.pages.quemSomos;
+      if (dto.pages.comoComprar !== undefined) setFields['storefront.pages.comoComprar'] = dto.pages.comoComprar;
+      if (dto.pages.guiaMedidas !== undefined) setFields['storefront.pages.guiaMedidas'] = dto.pages.guiaMedidas;
+      if (dto.pages.contato !== undefined) setFields['storefront.pages.contato'] = dto.pages.contato;
+    }
+    if (dto.lookbook !== undefined) setFields['storefront.lookbook'] = dto.lookbook;
+    if (dto.returnPolicy !== undefined) {
+      if (dto.returnPolicy.windowDays !== undefined) {
+        setFields['storefront.returnPolicy.windowDays'] = dto.returnPolicy.windowDays;
+      }
+      if (dto.returnPolicy.policyText !== undefined) {
+        setFields['storefront.returnPolicy.policyText'] = dto.returnPolicy.policyText;
+      }
+    }
+    if (dto.metaTitle !== undefined) setFields['storefront.metaTitle'] = dto.metaTitle;
+    if (dto.metaDescription !== undefined) setFields['storefront.metaDescription'] = dto.metaDescription;
+
+    const doc = await this.tenantModel
+      .findByIdAndUpdate(id, { $set: setFields }, { new: true })
+      .exec();
+    if (!doc) throw new NotFoundException();
+
+    this.slugCache.delete(doc.slug);
     return doc;
   }
 
@@ -269,6 +402,16 @@ export class TenantsService {
       infinitePayTag: tenant.infinitePayTag,
       plan: tenant.plan,
       limits: this.resolveLimits(tenant),
+      pricingDisplay: tenant.pricingDisplay,
+      shippingConfig: tenant.shippingConfig,
+      storefront: tenant.storefront,
+      // Só os IDs de pixel (client-side) — os tokens de servidor (Conversions API/Measurement
+      // Protocol/Events API) nunca saem do backend, o bundle público não pode carregá-los.
+      analytics: {
+        metaPixelId: tenant.analytics?.metaPixelId,
+        ga4MeasurementId: tenant.analytics?.ga4MeasurementId,
+        tiktokPixelId: tenant.analytics?.tiktokPixelId,
+      },
     };
   }
 

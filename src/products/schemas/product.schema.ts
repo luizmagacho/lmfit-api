@@ -17,6 +17,14 @@ export class Product {
   @Prop({ trim: true })
   description?: string;
 
+  /** Composição do tecido (ex.: "100% poliéster"). PDP v2 (Loop 5). */
+  @Prop({ trim: true })
+  composition?: string;
+
+  /** Instruções de cuidado/lavagem. PDP v2 (Loop 5). */
+  @Prop({ trim: true })
+  careInstructions?: string;
+
   @Prop({ trim: true })
   category?: string;
 

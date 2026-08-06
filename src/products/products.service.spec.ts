@@ -108,3 +108,248 @@ describe('ProductsService — stock movement atomicity', () => {
     expect(matchStage.reason.$in).toEqual(expect.arrayContaining(['sale', 'sale_reversal', 'return']));
   });
 });
+
+describe('ProductsService — public catalog filters/sort/pagination (Loop 5)', () => {
+  let service: ProductsService;
+  const productModel: any = { aggregate: jest.fn(), distinct: jest.fn() };
+  const variantModel = {};
+  const ledgerModel = {};
+  const locations = {};
+  const eventEmitter = { emit: jest.fn() };
+  const tenantId = new Types.ObjectId().toString();
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ProductsService,
+        { provide: getModelToken(Product.name), useValue: productModel },
+        { provide: getModelToken(ProductVariant.name), useValue: variantModel },
+        { provide: getModelToken(StockLedger.name), useValue: ledgerModel },
+        { provide: ExcelSpreadsheetService, useValue: {} },
+        { provide: EventEmitter2, useValue: eventEmitter },
+        { provide: LocationsService, useValue: locations },
+      ],
+    }).compile();
+    service = module.get<ProductsService>(ProductsService);
+  });
+
+  function mockAggregate(resultForItems: unknown[], resultForCount: unknown[]) {
+    let call = 0;
+    productModel.aggregate.mockImplementation(() => {
+      call += 1;
+      return { exec: jest.fn().mockResolvedValue(call === 1 ? resultForItems : resultForCount) };
+    });
+  }
+
+  it('applies category as a top-level $match', async () => {
+    mockAggregate([], [{ total: 0 }]);
+    await service.listPublicCatalog(tenantId, { category: 'Camisas', page: 1, limit: 20 } as any);
+    const pipeline = productModel.aggregate.mock.calls[0][0];
+    expect(pipeline[0].$match.category).toBe('Camisas');
+  });
+
+  it('combines size+color into a single $elemMatch on the same variant', async () => {
+    mockAggregate([], [{ total: 0 }]);
+    await service.listPublicCatalog(tenantId, { size: 'M', color: 'Preto', page: 1, limit: 20 } as any);
+    const pipeline = productModel.aggregate.mock.calls[0][0];
+    const variantMatchStage = pipeline.find((s: any) => s.$match?.variants?.$elemMatch);
+    expect(variantMatchStage.$match.variants.$elemMatch).toEqual({ size: 'M', color: 'Preto' });
+  });
+
+  it('filters price independently of size/color via a second $elemMatch under $and', async () => {
+    mockAggregate([], [{ total: 0 }]);
+    await service.listPublicCatalog(tenantId, {
+      color: 'Preto',
+      priceMin: 100,
+      priceMax: 200,
+      page: 1,
+      limit: 20,
+    } as any);
+    const pipeline = productModel.aggregate.mock.calls[0][0];
+    const andStage = pipeline.find((s: any) => s.$match?.$and);
+    expect(andStage.$match.$and).toEqual([
+      { variants: { $elemMatch: { color: 'Preto' } } },
+      { variants: { $elemMatch: { price: { $gte: 100, $lte: 200 } } } },
+    ]);
+  });
+
+  it.each([
+    ['menor-preco', { minVariantPrice: 1 }],
+    ['maior-preco', { minVariantPrice: -1 }],
+    ['lancamentos', { createdAt: -1 }],
+    ['relevancia', { name: 1 }],
+    [undefined, { name: 1 }],
+  ])('sort=%s produces the matching $sort stage', async (sort, expected) => {
+    mockAggregate([], [{ total: 0 }]);
+    await service.listPublicCatalog(tenantId, { sort, page: 1, limit: 20 } as any);
+    const pipeline = productModel.aggregate.mock.calls[0][0];
+    const sortStage = pipeline.find((s: any) => s.$sort);
+    expect(sortStage.$sort).toEqual(expected);
+  });
+
+  it('computes $skip from page/limit and applies $limit', async () => {
+    mockAggregate([], [{ total: 0 }]);
+    await service.listPublicCatalog(tenantId, { page: 3, limit: 10 } as any);
+    const pipeline = productModel.aggregate.mock.calls[0][0];
+    const skipStage = pipeline.find((s: any) => s.$skip !== undefined);
+    const limitStage = pipeline.find((s: any) => s.$limit !== undefined);
+    expect(skipStage.$skip).toBe(20);
+    expect(limitStage.$limit).toBe(10);
+  });
+
+  it('returns total from the separate count pipeline, not the items page length', async () => {
+    mockAggregate([{ _id: '1', name: 'A', variants: [] }], [{ total: 42 }]);
+    const result = await service.listPublicCatalog(tenantId, { page: 1, limit: 20 } as any);
+    expect(result.total).toBe(42);
+    expect(result.items).toHaveLength(1);
+  });
+
+  it('getPublicCatalogFacets aggregates distinct colors/sizes/price range independent of any filter', async () => {
+    productModel.distinct.mockReturnValue({ exec: jest.fn().mockResolvedValue(['Camisas', 'Shorts']) });
+    productModel.aggregate.mockReturnValue({
+      exec: jest
+        .fn()
+        .mockResolvedValue([{ colors: ['Preto', 'Branco'], sizes: ['M', 'G'], priceMin: 50, priceMax: 300 }]),
+    });
+    const facets = await service.getPublicCatalogFacets(tenantId);
+    expect(facets).toEqual({
+      categories: ['Camisas', 'Shorts'],
+      colors: ['Branco', 'Preto'],
+      sizes: ['G', 'M'],
+      priceMin: 50,
+      priceMax: 300,
+    });
+  });
+
+  describe('getPublicProductsByIds (wishlist — Loop 9 continuation)', () => {
+    it('returns [] without querying when no id is a valid ObjectId', async () => {
+      const items = await service.getPublicProductsByIds(tenantId, ['not-an-id', '']);
+      expect(items).toEqual([]);
+      expect(productModel.aggregate).not.toHaveBeenCalled();
+    });
+
+    it('filters out invalid ids and matches only active products by the valid ones', async () => {
+      const id1 = new Types.ObjectId().toString();
+      mockAggregate([{ _id: id1, name: 'Legging', variants: [] }], []);
+      await service.getPublicProductsByIds(tenantId, [id1, 'not-an-id']);
+      const pipeline = productModel.aggregate.mock.calls[0][0];
+      expect(pipeline[0].$match.active).toBe(true);
+      expect(pipeline[0].$match._id.$in).toEqual([new Types.ObjectId(id1)]);
+    });
+
+    it('drops ids that no longer resolve to an active product (stale wishlist entries)', async () => {
+      const id1 = new Types.ObjectId().toString();
+      const id2 = new Types.ObjectId().toString();
+      // Only id1 comes back from the (mocked) $match on active products.
+      mockAggregate([{ _id: id1, name: 'Legging', variants: [] }], []);
+      const items = await service.getPublicProductsByIds(tenantId, [id1, id2]);
+      expect(items).toHaveLength(1);
+      expect((items[0] as any)._id).toBe(id1);
+    });
+  });
+});
+
+describe('ProductsService.reserveForOfflineSale — location + tenant-wide reconciled reserve (Loop PDV-OFF-4)', () => {
+  let service: ProductsService;
+  const variantModel = { findOneAndUpdate: jest.fn() };
+  const productModel = {};
+  const ledgerModel = { create: jest.fn() };
+  const locations = {
+    reserveUpToAvailable: jest.fn(),
+    adjust: jest.fn(),
+    getOrCreateDefault: jest.fn(),
+  };
+  const eventEmitter = { emit: jest.fn() };
+  const tenantId = new Types.ObjectId().toString();
+  const variantId = new Types.ObjectId().toString();
+  const locationId = new Types.ObjectId().toString();
+  const orderId = new Types.ObjectId();
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    ledgerModel.create.mockResolvedValue({});
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ProductsService,
+        { provide: getModelToken(Product.name), useValue: productModel },
+        { provide: getModelToken(ProductVariant.name), useValue: variantModel },
+        { provide: getModelToken(StockLedger.name), useValue: ledgerModel },
+        { provide: ExcelSpreadsheetService, useValue: {} },
+        { provide: EventEmitter2, useValue: eventEmitter },
+        { provide: LocationsService, useValue: locations },
+      ],
+    }).compile();
+    service = module.get<ProductsService>(ProductsService);
+  });
+
+  it('reserves the full amount when both the location and the tenant total have enough', async () => {
+    locations.reserveUpToAvailable.mockResolvedValue(4);
+    variantModel.findOneAndUpdate.mockReturnValue({ exec: jest.fn().mockResolvedValue({ quantityOnHand: 10 }) });
+
+    const fulfilled = await service.reserveForOfflineSale(tenantId, variantId, locationId, 4, orderId);
+
+    expect(fulfilled).toBe(4);
+    expect(locations.adjust).not.toHaveBeenCalled();
+    expect(ledgerModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ delta: -4, reason: 'sale', orderId }),
+    );
+    // Regression: Mongoose rejects an aggregation-pipeline update unless {updatePipeline:
+    // true} is passed explicitly — only surfaces against a real MongoDB, never in this mock.
+    const [, , options] = variantModel.findOneAndUpdate.mock.calls[0];
+    expect(options).toMatchObject({ updatePipeline: true });
+  });
+
+  it('returns 0 without touching quantityOnHand or the ledger when the location has nothing allocated', async () => {
+    locations.reserveUpToAvailable.mockResolvedValue(0);
+
+    const fulfilled = await service.reserveForOfflineSale(tenantId, variantId, locationId, 4, orderId);
+
+    expect(fulfilled).toBe(0);
+    expect(variantModel.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(ledgerModel.create).not.toHaveBeenCalled();
+  });
+
+  it('gives back the difference to the location when the tenant-wide total is lower (drift case)', async () => {
+    locations.reserveUpToAvailable.mockResolvedValue(4);
+    variantModel.findOneAndUpdate.mockReturnValue({ exec: jest.fn().mockResolvedValue({ quantityOnHand: 2 }) });
+
+    const fulfilled = await service.reserveForOfflineSale(tenantId, variantId, locationId, 4, orderId);
+
+    expect(fulfilled).toBe(2);
+    expect(locations.adjust).toHaveBeenCalledWith(tenantId, expect.anything(), 2, locationId);
+    expect(ledgerModel.create).toHaveBeenCalledWith(expect.objectContaining({ delta: -2 }));
+  });
+
+  it('never writes a ledger entry when the tenant-wide total turns out to be zero', async () => {
+    locations.reserveUpToAvailable.mockResolvedValue(3);
+    variantModel.findOneAndUpdate.mockReturnValue({ exec: jest.fn().mockResolvedValue({ quantityOnHand: 0 }) });
+
+    const fulfilled = await service.reserveForOfflineSale(tenantId, variantId, locationId, 3, orderId);
+
+    expect(fulfilled).toBe(0);
+    expect(locations.adjust).toHaveBeenCalledWith(tenantId, expect.anything(), 3, locationId);
+    expect(ledgerModel.create).not.toHaveBeenCalled();
+  });
+
+  it('resolves to the tenant default location when none is passed', async () => {
+    const defaultLocId = new Types.ObjectId();
+    locations.getOrCreateDefault.mockResolvedValue({ _id: defaultLocId });
+    locations.reserveUpToAvailable.mockResolvedValue(1);
+    variantModel.findOneAndUpdate.mockReturnValue({ exec: jest.fn().mockResolvedValue({ quantityOnHand: 5 }) });
+
+    await service.reserveForOfflineSale(tenantId, variantId, undefined, 1, orderId);
+
+    expect(locations.reserveUpToAvailable).toHaveBeenCalledWith(
+      tenantId,
+      expect.anything(),
+      String(defaultLocId),
+      1,
+    );
+  });
+
+  it('is a no-op for a zero or negative requested quantity', async () => {
+    expect(await service.reserveForOfflineSale(tenantId, variantId, locationId, 0, orderId)).toBe(0);
+    expect(locations.reserveUpToAvailable).not.toHaveBeenCalled();
+  });
+});

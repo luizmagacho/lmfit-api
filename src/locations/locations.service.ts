@@ -11,6 +11,7 @@ import { StockLevel } from './schemas/stock-level.schema';
 import type { CreateLocationDto } from './dto/create-location.dto';
 import type { UpdateLocationDto } from './dto/update-location.dto';
 import type { TransferStockDto } from './dto/transfer-stock.dto';
+import type { AllocateStockDto } from './dto/allocate-stock.dto';
 
 const DEFAULT_LOCATION_NAME = 'Loja Principal';
 
@@ -118,6 +119,14 @@ export class LocationsService {
    * Mirrors a stock change (already applied/validated against the cached total on
    * ProductVariant.quantityOnHand elsewhere) into the per-location ledger.
    * Best-effort: never lets the location balance drift below zero.
+   *
+   * Increments are unconditionally safe (upsert). Decrements use a `$gte` guard so two
+   * concurrent decrements against the same location never race past zero — the old
+   * `findOne` → `Math.max(0, ...)` → `updateOne` sequence had a TOCTOU window where both
+   * reads could see the same stale quantity. If the guard can't be satisfied (not enough
+   * recorded at this location, or no row yet), the location's quantity is clamped to zero
+   * instead of throwing — same drift-tolerant posture as before, just race-free for the
+   * common (sufficient stock) case.
    */
   async adjust(
     tenantId: string,
@@ -130,13 +139,63 @@ export class LocationsService {
     const vid = new Types.ObjectId(variantId);
     const lid = locationId ? new Types.ObjectId(locationId) : (await this.getOrCreateDefault(tenantId))._id;
 
-    const row = await this.stockLevelModel.findOne({ tenantId: tid, variantId: vid, locationId: lid }).exec();
-    const next = Math.max(0, (row?.quantity ?? 0) + delta);
-    await this.stockLevelModel.updateOne(
-      { tenantId: tid, variantId: vid, locationId: lid },
-      { $set: { quantity: next } },
-      { upsert: true },
-    );
+    if (delta > 0) {
+      await this.stockLevelModel.updateOne(
+        { tenantId: tid, variantId: vid, locationId: lid },
+        { $inc: { quantity: delta } },
+        { upsert: true },
+      );
+      return;
+    }
+
+    const updated = await this.stockLevelModel
+      .findOneAndUpdate(
+        { tenantId: tid, variantId: vid, locationId: lid, quantity: { $gte: -delta } },
+        { $inc: { quantity: delta } },
+      )
+      .exec();
+    if (!updated) {
+      await this.stockLevelModel.updateOne(
+        { tenantId: tid, variantId: vid, locationId: lid },
+        { $set: { quantity: 0 } },
+        { upsert: true },
+      );
+    }
+  }
+
+  /**
+   * Atomically reserves up to `requestedQty` at one location — takes everything asked for
+   * if available, otherwise takes whatever is left and returns that smaller amount, in a
+   * single round-trip (no read-then-write race). Used by offline-sync (`OrdersService.syncBatch`)
+   * to decide, per line, how much of an offline sale the location can actually cover before
+   * the remainder is auto-converted into a backorder line.
+   *
+   * Implemented as a single `findOneAndUpdate` with an aggregation-pipeline update: the
+   * document is clamped to `max(quantity - requestedQty, 0)`, and since `findOneAndUpdate`
+   * without `{new: true}` returns the pre-image, that pre-image's `quantity` is exactly the
+   * atomic snapshot needed to compute how much was actually taken — no other write can have
+   * interleaved between reading and writing within a single MongoDB document operation.
+   */
+  async reserveUpToAvailable(
+    tenantId: string,
+    variantId: string | Types.ObjectId,
+    locationId: string | Types.ObjectId,
+    requestedQty: number,
+  ): Promise<number> {
+    if (requestedQty <= 0) return 0;
+    const tid = new Types.ObjectId(tenantId);
+    const vid = new Types.ObjectId(variantId);
+    const lid = new Types.ObjectId(locationId);
+
+    const before = await this.stockLevelModel
+      .findOneAndUpdate(
+        { tenantId: tid, variantId: vid, locationId: lid },
+        [{ $set: { quantity: { $max: [{ $subtract: ['$quantity', requestedQty] }, 0] } } }],
+        { updatePipeline: true },
+      )
+      .exec();
+    if (!before) return 0;
+    return Math.min(before.quantity, requestedQty);
   }
 
   /** Per-location breakdown for a variant (used by inventory screens). */
@@ -175,23 +234,75 @@ export class LocationsService {
     ]);
     if (!fromLocation || !toLocation) throw new NotFoundException('Local não encontrado');
 
-    const fromRow = await this.stockLevelModel.findOne({ tenantId: tid, variantId: vid, locationId: fromId }).exec();
-    const available = fromRow?.quantity ?? 0;
-    if (dto.quantity > available) {
+    // Atomic guarded decrement instead of check-then-write: two concurrent transfers out of
+    // the same location could otherwise both pass the pre-check against the same stale
+    // `available` value and jointly overdraw it.
+    const decremented = await this.stockLevelModel
+      .findOneAndUpdate(
+        { tenantId: tid, variantId: vid, locationId: fromId, quantity: { $gte: dto.quantity } },
+        { $inc: { quantity: -dto.quantity } },
+      )
+      .exec();
+    if (!decremented) {
+      const fromRow = await this.stockLevelModel.findOne({ tenantId: tid, variantId: vid, locationId: fromId }).lean().exec();
+      const available = fromRow?.quantity ?? 0;
       throw new BadRequestException(
         `Estoque insuficiente no local de origem: disponível ${available}, solicitado ${dto.quantity}`,
       );
     }
 
     await this.stockLevelModel.updateOne(
-      { tenantId: tid, variantId: vid, locationId: fromId },
-      { $inc: { quantity: -dto.quantity } },
-    );
-    await this.stockLevelModel.updateOne(
       { tenantId: tid, variantId: vid, locationId: toId },
       { $inc: { quantity: dto.quantity } },
       { upsert: true },
     );
     return { transferred: dto.quantity };
+  }
+
+  /** Allocate stock from the tenant's central/default pool into a specific location —
+   *  sugar over `transfer()` so callers don't need to know the default location's id. */
+  async allocate(tenantId: string, dto: AllocateStockDto) {
+    const fromLocationId = String((await this.getOrCreateDefault(tenantId))._id);
+    return this.transfer(tenantId, {
+      variantId: dto.variantId,
+      fromLocationId,
+      toLocationId: dto.toLocationId,
+      quantity: dto.quantity,
+    });
+  }
+
+  /** Everything a location has allocated (quantity > 0), with product/SKU labels —
+   *  used by the admin "estoque alocado" view and, later, the PDV offline catalog snapshot. */
+  async stockByLocation(tenantId: string, locationId: string, page: number, limit: number) {
+    if (!Types.ObjectId.isValid(locationId)) throw new NotFoundException();
+    const tid = new Types.ObjectId(tenantId);
+    const lid = new Types.ObjectId(locationId);
+    const location = await this.model.findOne({ _id: lid, tenantId: tid }).lean().exec();
+    if (!location) throw new NotFoundException('Local não encontrado');
+
+    const query = { tenantId: tid, locationId: lid, quantity: { $gt: 0 } };
+    const [rows, total] = await Promise.all([
+      this.stockLevelModel
+        .find(query)
+        .sort({ updatedAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate<{
+          variantId: { _id: Types.ObjectId; sku: string; productId: { name: string } | null } | null;
+        }>({ path: 'variantId', select: 'sku productId', populate: { path: 'productId', select: 'name' } })
+        .lean()
+        .exec(),
+      this.stockLevelModel.countDocuments(query).exec(),
+    ]);
+
+    const items = rows
+      .filter((r) => r.variantId != null)
+      .map((r) => ({
+        variantId: String(r.variantId!._id),
+        sku: r.variantId!.sku,
+        productName: r.variantId!.productId?.name ?? '',
+        quantity: r.quantity,
+      }));
+    return { items, total, page, limit };
   }
 }

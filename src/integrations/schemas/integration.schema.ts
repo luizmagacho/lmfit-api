@@ -35,7 +35,7 @@ export class Integration {
   @Prop({
     type: String,
     required: true,
-    enum: ['bagy', 'nuvemshop', 'tray', 'loja_integrada', 'shopify', 'mercadolivre', 'shopee'],
+    enum: ['bagy', 'nuvemshop', 'tray', 'loja_integrada', 'shopify', 'mercadolivre', 'shopee', 'tiktok'],
   })
   platform: IntegrationPlatform;
 

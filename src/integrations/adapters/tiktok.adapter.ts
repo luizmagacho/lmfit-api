@@ -46,7 +46,20 @@ export type TiktokTokenExchangeResult = {
 @Injectable()
 export class TiktokAdapter implements PlatformAdapter {
   platform: IntegrationPlatform = 'tiktok';
+  /** Best-guess — mesma ressalva do resto deste adapter: não confirmado contra o Partner Center real. */
+  readonly webhookSignatureHeader = 'x-tts-signature';
   private readonly logger = new Logger(TiktokAdapter.name);
+
+  /** HMAC-SHA256 do corpo bruto com o app_secret (`apiKey`) — não validado contra uma conta real. */
+  verifyWebhookSignature(payload: Buffer, signatureHeader: string, secret: string): boolean {
+    if (!signatureHeader) return false;
+    const expected = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+    try {
+      return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signatureHeader));
+    } catch {
+      return false;
+    }
+  }
 
   private sign(appSecret: string, path: string, params: Record<string, string | number>, body?: unknown): string {
     const sortedKeys = Object.keys(params).sort();

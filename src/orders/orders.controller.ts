@@ -24,10 +24,12 @@ import { ImportJsonDto } from '../common/dto/import-json.dto';
 import { Audited } from '../audit/audited.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { TenantId } from '../common/decorators/tenant-id.decorator';
+import { LocationId } from '../common/decorators/location-id.decorator';
 import type { JwtUserPayload } from '../auth/jwt-user.payload';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { OrderListQueryDto } from './dto/order-list-query.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
+import { SyncBatchDto } from './dto/sync-batch.dto';
 import { OrdersService } from './orders.service';
 
 @ApiTags('orders')
@@ -44,8 +46,24 @@ export class OrdersController {
     @TenantId() tenantId: string,
     @Body() dto: CreateOrderDto,
     @CurrentUser() user: JwtUserPayload,
+    @LocationId() locationId?: string,
   ) {
-    return this.orders.create(tenantId, dto, user.sub);
+    // Presencial: o local vem sempre do operador autenticado (nunca do corpo da requisição,
+    // que poderia ser adulterado) — só cai no local padrão do tenant se o operador não tiver
+    // um local atribuído ainda.
+    const resolved = dto.channel === 'in_person' && locationId ? { ...dto, locationId } : dto;
+    return this.orders.create(tenantId, resolved, user.sub);
+  }
+
+  @Post('sync-batch')
+  @Audited('orders.sync-batch')
+  syncBatch(
+    @TenantId() tenantId: string,
+    @Body() dto: SyncBatchDto,
+    @CurrentUser() user: JwtUserPayload,
+    @LocationId() locationId?: string,
+  ) {
+    return this.orders.syncBatch(tenantId, locationId, dto.sales, user.sub);
   }
 
   @Get()

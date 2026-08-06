@@ -39,6 +39,11 @@ export class CreateOrderDto {
   @IsMongoId()
   operatorUserId?: string;
 
+  @ApiPropertyOptional({ description: 'Local de venda (PDV offline); normalmente resolvido do usuário logado, não enviado pelo cliente' })
+  @IsOptional()
+  @IsMongoId()
+  locationId?: string;
+
   @ApiPropertyOptional({ enum: ['pix', 'cash', 'card'] })
   @IsOptional()
   @IsEnum(['pix', 'cash', 'card'])
@@ -90,4 +95,10 @@ export class CreateOrderDto {
   @IsNumber()
   @Min(0)
   discountTotal?: number;
+
+  @ApiPropertyOptional({ default: 0, description: 'Crédito de loja já deduzido atomicamente do cliente' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  creditApplied?: number;
 }

@@ -8,7 +8,9 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { OrdersService } from '../orders/orders.service';
 import { PurchasesService } from '../purchases/purchases.service';
 import { SuppliersService } from '../suppliers/suppliers.service';
+import { TenantsService } from '../tenants/tenants.service';
 import type { WhatsAppMessage } from './schemas/whatsapp-message.schema';
+import { WhatsappChatService } from './whatsapp-chat.service';
 import { WhatsappMessagesService } from './whatsapp-messages.service';
 import { WhatsappSendersService } from './whatsapp-senders.service';
 
@@ -26,6 +28,8 @@ export class InboundMessageProcessor {
     private readonly customers: CustomersService,
     private readonly suppliers: SuppliersService,
     private readonly notify: NotificationsService,
+    private readonly tenants: TenantsService,
+    private readonly whatsappChat: WhatsappChatService,
   ) {}
 
   async process(doc: HydratedDocument<WhatsAppMessage>): Promise<void> {
@@ -45,6 +49,15 @@ export class InboundMessageProcessor {
     if (requireAllow) {
       const ok = await this.senders.isAllowed(from);
       if (!ok) {
+        // Loop 11-B — número fora da allowlist de staff quase sempre é um CLIENTE de verdade, não
+        // alguém tentando (mal) usar a automação de ERP. Se o tenant ligou a IA, responde o
+        // cliente de verdade em vez de só mandar um e-mail interno que ele nunca vê.
+        const tenant = await this.tenants.findById(doc.tenantId.toString()).catch(() => null);
+        if (tenant?.whatsappAiEnabled) {
+          await this.messages.updateOne(wamid, { processingStatus: 'ai_replied' });
+          await this.whatsappChat.handleCustomerMessage(tenant, from, text);
+          return;
+        }
         await this.messages.updateOne(wamid, {
           processingStatus: 'escalated',
           error: 'sender_not_allowlisted',

@@ -67,6 +67,16 @@ export class ReportsController {
     );
   }
 
+  /** Vendas por influenciador (top N) — cruza `Order.couponCode` com `Promotion.influencerId`. */
+  @Get('sales-by-influencer')
+  salesByInfluencer(@TenantId() tenantId: string, @Query() q: ReportsRevenueQueryDto) {
+    return this.reports.salesByInfluencer(
+      tenantId,
+      { from: new Date(q.from), to: new Date(q.to) },
+      q.limit ?? 10,
+    );
+  }
+
   /**
    * DRE Simplificado — Faturamento, Lucro Bruto, Lucro Líquido.
    * @param taxRate Percentual de imposto (Simples Nacional). Padrão: 6.

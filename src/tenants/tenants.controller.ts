@@ -19,6 +19,10 @@ import { CreateTenantRequestDto } from './dto/create-tenant-request.dto';
 import { UpdateBrandingDto } from './dto/update-branding.dto';
 import { UpdateFiscalConfigDto } from './dto/update-fiscal-config.dto';
 import { UpdateLoyaltyConfigDto } from './dto/update-loyalty-config.dto';
+import { UpdatePricingDisplayDto } from './dto/update-pricing-display.dto';
+import { UpdateShippingConfigDto } from './dto/update-shipping-config.dto';
+import { UpdateAnalyticsConfigDto } from './dto/update-analytics-config.dto';
+import { UpdateStorefrontConfigDto } from './dto/update-storefront-config.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { TenantsService } from './tenants.service';
 
@@ -76,6 +80,30 @@ export class TenantsController {
   @Patch(':id/loyalty')
   updateLoyaltyConfig(@Param('id') id: string, @Body() dto: UpdateLoyaltyConfigDto) {
     return this.tenants.updateLoyaltyConfig(id, dto);
+  }
+
+  @Audited('tenants.updatePricingDisplay')
+  @Patch(':id/pricing-display')
+  updatePricingDisplay(@Param('id') id: string, @Body() dto: UpdatePricingDisplayDto) {
+    return this.tenants.updatePricingDisplay(id, dto);
+  }
+
+  @Audited('tenants.updateShippingConfig')
+  @Patch(':id/shipping')
+  updateShippingConfig(@Param('id') id: string, @Body() dto: UpdateShippingConfigDto) {
+    return this.tenants.updateShippingConfig(id, dto);
+  }
+
+  @Audited('tenants.updateAnalyticsConfig')
+  @Patch(':id/analytics')
+  updateAnalyticsConfig(@Param('id') id: string, @Body() dto: UpdateAnalyticsConfigDto) {
+    return this.tenants.updateAnalyticsConfig(id, dto);
+  }
+
+  @Audited('tenants.updateStorefrontConfig')
+  @Patch(':id/storefront')
+  updateStorefrontConfig(@Param('id') id: string, @Body() dto: UpdateStorefrontConfigDto) {
+    return this.tenants.updateStorefrontConfig(id, dto);
   }
 
   @Audited('tenants.softDelete')

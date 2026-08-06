@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { TenantId } from '../common/decorators/tenant-id.decorator';
 import { TenantFeatures } from '../common/decorators/tenant-features.decorator';
 import {
@@ -34,6 +35,9 @@ export class PublicOrderDraftsController {
     return this.drafts.patchByToken(tenantId, token, dto, features);
   }
 
+  // Loop 10 — mesmo teto de "escrita adjacente a pagamento" já usado em
+  // public-payments.controller.ts (dev-confirm/simulate-confirm), já que submit cria pedido real.
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post(':token/submit')
   submit(
     @TenantId() tenantId: string,

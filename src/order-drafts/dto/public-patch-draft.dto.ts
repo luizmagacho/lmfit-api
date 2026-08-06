@@ -1,12 +1,15 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsEnum,
   IsMongoId,
   IsNumber,
   IsOptional,
   IsString,
+  Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -19,6 +22,7 @@ export class PublicDraftLineDto {
   @ApiProperty()
   @IsNumber()
   @Min(1)
+  @Max(9999)
   quantity: number;
 }
 
@@ -26,6 +30,7 @@ export class PublicCreateDraftDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   waId?: string;
 
   @ApiPropertyOptional()
@@ -46,6 +51,7 @@ export class PublicPatchDraftDto {
   @ApiPropertyOptional({ type: [PublicDraftLineDto] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => PublicDraftLineDto)
   lines?: PublicDraftLineDto[];
@@ -58,18 +64,18 @@ export class PublicPatchDraftDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(100)
   paymentMethodChoice?: string;
 
-  @ApiPropertyOptional({ description: 'Método de frete escolhido (pickup, standard, express).' })
+  @ApiPropertyOptional({ enum: ['pickup', 'standard', 'express'] })
   @IsOptional()
-  @IsString()
-  shippingMethod?: string;
+  @IsEnum(['pickup', 'standard', 'express'])
+  shippingMethod?: 'pickup' | 'standard' | 'express';
 
-  @ApiPropertyOptional({ description: 'Valor do frete calculado no front, aplicado ao total no submit.' })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  shippingCost?: number;
+  // Sem campo de shippingCost aqui de propósito: o valor nunca vem do cliente (Loop 3) — é sempre
+  // recalculado no servidor a partir de shippingMethod + shippingConfig do tenant + subtotal
+  // (mesma lógica do couponCode, que já seguia esse princípio). Com `whitelist: true` no
+  // ValidationPipe global, um shippingCost enviado no body é descartado antes de chegar aqui.
 
   @ApiPropertyOptional({
     description:
@@ -77,6 +83,7 @@ export class PublicPatchDraftDto {
   })
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   couponCode?: string;
 
   @ApiPropertyOptional({

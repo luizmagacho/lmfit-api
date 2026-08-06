@@ -46,6 +46,29 @@ Regras para pedidos de produtos que a loja NÃO vende (fora do catálogo abaixo 
 
 Se nada pôde ser feito, "actions" deve ser exatamente [].`;
 
+/** Loop 11-C — bloco extra do prompt, só anexado quando `reply()` recebe `whatsappOrderContext`
+ *  (conversa por WhatsApp com carrinho pronto pra virar pedido de verdade). As opções de frete
+ *  citadas são SEMPRE as reais configuradas pelo lojista (nunca inventadas). */
+function buildWhatsappOrderPrompt(shippingOptions: WhatsappShippingOption[]): string {
+  const optionsList = shippingOptions
+    .map((o) => `  • "${o.value}": ${o.label}${o.fee > 0 ? ` — ${formatBRL(o.fee)}` : ' — grátis'}`)
+    .join('\n');
+  return `
+
+Você também pode fechar o pedido direto na conversa (o cliente não precisa ir pro site). Inclua em "actions":
+{"type": "confirm_order", "name": "nome do cliente", "shippingOption": "um dos valores exatos abaixo"}
+
+Opções de entrega reais desta loja:
+${optionsList}
+
+Regras para "confirm_order":
+- Só inclua quando o cliente confirmar explicitamente que quer FECHAR o pedido (ex.: "pode fechar", "é isso mesmo, finaliza", "confirmo") — nunca inclua automaticamente só por ele ter mostrado interesse.
+- O carrinho precisa ter pelo menos 1 item — se estiver vazio, explique em "reply" que precisa adicionar algo primeiro.
+- Você precisa saber o NOME do cliente e qual opção de entrega ele quer antes de incluir esta ação — se faltar algum dos dois, pergunte em "reply" em vez de incluir a ação.
+- Use "shippingOption" EXATAMENTE como aparece entre aspas na lista acima (ex.: "standard"), nunca traduza ou invente outro valor.
+- Depois de incluir "confirm_order", não repita a mesma ação nas próximas mensagens a menos que o cliente peça pra mudar algo e confirmar de novo.`;
+}
+
 function tokenize(text: string): string[] {
   return text
     .toLowerCase()
@@ -114,7 +137,22 @@ export type ChatRemoveAction = {
   quantity: number | null;
 };
 
-export type ChatAction = ChatCartAction | ChatLeadAction | ChatRemoveAction;
+/** Loop 11-C — só existe quando o chamador passa `whatsappOrderContext` pro `reply()` (o widget
+ *  web nunca faz isso, já tem checkout de verdade no site). `shippingOption` é sempre um dos
+ *  valores REAIS passados em `whatsappOrderContext.shippingOptions`, nunca inventado pela LLM. */
+export type ChatConfirmOrderAction = {
+  type: 'confirm_order';
+  name: string;
+  shippingOption: string;
+};
+
+export type ChatAction = ChatCartAction | ChatLeadAction | ChatRemoveAction | ChatConfirmOrderAction;
+
+export type WhatsappShippingOption = { value: string; label: string; fee: number };
+
+export type WhatsappOrderContext = {
+  shippingOptions: WhatsappShippingOption[];
+};
 
 @Injectable()
 export class ChatService {
@@ -251,12 +289,26 @@ export class ChatService {
     return { type: 'remove_from_cart', variantId: String(line.variantId), isOrder: line.isOrder === true, quantity };
   }
 
+  /** Loop 11-C — `shippingOption` precisa bater com um dos valores REAIS passados por
+   *  `whatsappOrderContext`, nunca um valor que a LLM tenha inventado. */
+  private validateConfirmOrderAction(
+    raw: Record<string, unknown>,
+    shippingOptions: WhatsappShippingOption[],
+  ): ChatConfirmOrderAction | null {
+    const name = String(raw.name ?? '').trim();
+    const shippingOption = String(raw.shippingOption ?? '').trim();
+    if (!name || !shippingOption) return null;
+    if (!shippingOptions.some((o) => o.value === shippingOption)) return null;
+    return { type: 'confirm_order', name, shippingOption };
+  }
+
   private async resolveActions(
     raw: Record<string, unknown>[],
     items: Array<Record<string, unknown>>,
     cartLines: Array<Record<string, unknown>>,
     allowBackorder: boolean,
     tenantId: string,
+    whatsappOrderContext?: WhatsappOrderContext,
   ): Promise<ChatAction[]> {
     const resolved: ChatAction[] = [];
     for (const r of raw) {
@@ -276,6 +328,9 @@ export class ChatService {
           });
           resolved.push(action);
         }
+      } else if (r.type === 'confirm_order' && whatsappOrderContext) {
+        const action = this.validateConfirmOrderAction(r, whatsappOrderContext.shippingOptions);
+        if (action) resolved.push(action);
       }
     }
     return resolved;
@@ -285,6 +340,7 @@ export class ChatService {
     tenantId: string,
     dto: PublicChatDto,
     tenantFeatures: string[] = [],
+    whatsappOrderContext?: WhatsappOrderContext,
   ): Promise<{ reply: string; actions: ChatAction[] }> {
     const allowBackorder = tenantFeatures.includes('production');
     const { items } = await this.catalog.listProducts(tenantId);
@@ -293,13 +349,19 @@ export class ChatService {
     const cartLines = (dto.cartLines ?? []) as unknown as Array<Record<string, unknown>>;
     const cartContext = this.buildCartContext(cartLines);
 
-    const systemPrompt = `${SYSTEM_PROMPT}\n\nCatálogo disponível:\n${catalogContext}\n\nCarrinho atual do cliente:\n${cartContext}`;
+    const orderPromptExtra = whatsappOrderContext
+      ? buildWhatsappOrderPrompt(whatsappOrderContext.shippingOptions)
+      : '';
+    const systemPrompt = `${SYSTEM_PROMPT}${orderPromptExtra}\n\nCatálogo disponível:\n${catalogContext}\n\nCarrinho atual do cliente:\n${cartContext}`;
     const history = (dto.history ?? []).map((h) => ({ role: h.role, content: h.content }));
 
     const { reply, actions } = await this.llm.chatReplyWithAction(systemPrompt, [
       ...history,
       { role: 'user', content: dto.message },
     ]);
-    return { reply, actions: await this.resolveActions(actions, items, cartLines, allowBackorder, tenantId) };
+    return {
+      reply,
+      actions: await this.resolveActions(actions, items, cartLines, allowBackorder, tenantId, whatsappOrderContext),
+    };
   }
 }

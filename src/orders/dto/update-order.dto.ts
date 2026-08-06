@@ -63,4 +63,19 @@ export class UpdateOrderDto {
   @ValidateNested({ each: true })
   @Type(() => OrderLineInputDto)
   lines?: OrderLineInputDto[];
+
+  @ApiPropertyOptional({ description: 'Transportadora (ex.: Correios, Jadlog)' })
+  @IsOptional()
+  @IsString()
+  carrier?: string;
+
+  @ApiPropertyOptional({ description: 'Código de rastreio real' })
+  @IsOptional()
+  @IsString()
+  trackingCode?: string;
+
+  @ApiPropertyOptional({ description: 'URL de rastreio (site da transportadora)' })
+  @IsOptional()
+  @IsString()
+  trackingUrl?: string;
 }

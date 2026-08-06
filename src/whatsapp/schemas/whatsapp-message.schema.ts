@@ -6,7 +6,8 @@ export type WhatsAppProcessingStatus =
   | 'parsed'
   | 'auto_posted'
   | 'escalated'
-  | 'failed';
+  | 'failed'
+  | 'ai_replied';
 
 export type WhatsAppMessageDocument = HydratedDocument<WhatsAppMessage>;
 
@@ -32,7 +33,7 @@ export class WhatsAppMessage {
 
   @Prop({
     type: String,
-    enum: ['received', 'parsed', 'auto_posted', 'escalated', 'failed'],
+    enum: ['received', 'parsed', 'auto_posted', 'escalated', 'failed', 'ai_replied'],
     default: 'received',
   })
   processingStatus: WhatsAppProcessingStatus;

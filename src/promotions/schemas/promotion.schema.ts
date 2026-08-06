@@ -41,6 +41,13 @@ export class Promotion {
 
   @Prop({ type: Types.ObjectId, ref: 'User' })
   createdBy?: Types.ObjectId;
+
+  /** Influenciador dono deste cupom, pra atribuição de vendas no relatório (Programa de
+   *  Influenciadores) — opcional, muitos-pra-um (um influenciador pode ter vários cupons ao longo
+   *  do tempo). `Order` não guarda `promotionId`, só `couponCode` — o relatório cruza por
+   *  `{tenantId, code}` pra achar este campo. */
+  @Prop({ type: Types.ObjectId, ref: 'Influencer' })
+  influencerId?: Types.ObjectId;
 }
 
 export const PromotionSchema = SchemaFactory.createForClass(Promotion);

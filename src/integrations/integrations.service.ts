@@ -118,6 +118,13 @@ export class IntegrationsService {
     return this.model.find({ tenantId: new Types.ObjectId(tenantId), active: true }).exec();
   }
 
+  /** Usado pelo webhook receptor: acha a integração ativa de uma plataforma pra um tenant (resolvido por slug, não por id). */
+  async findByTenantAndPlatform(tenantId: string, platform: string): Promise<IntegrationDocument | null> {
+    return this.model
+      .findOne({ tenantId: new Types.ObjectId(tenantId), platform: platform as Integration['platform'], active: true })
+      .exec();
+  }
+
   async update(tenantId: string, id: string, dto: UpdateIntegrationDto): Promise<IntegrationDocument> {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
     const doc = await this.model.findOneAndUpdate(

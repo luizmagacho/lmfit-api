@@ -5,4 +5,6 @@ export type JwtUserPayload = {
   email: string;
   role: UserRole;
   tenantId: string;
+  /** Local fixo de trabalho do funcionário (PDV offline) — ausente se nenhum admin atribuiu. */
+  locationId?: string;
 };

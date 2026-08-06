@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ProductsService } from '../products/products.service';
+import type { PublicCatalogQueryDto } from '../products/dto/public-catalog-query.dto';
 
 @Injectable()
 export class CatalogService {
@@ -9,9 +10,12 @@ export class CatalogService {
     return this.productsService.listPublicCatalogCategories(tenantId);
   }
 
-  async listProducts(tenantId: string) {
-    const items = await this.productsService.listPublicCatalog(tenantId);
-    return { items, total: items.length };
+  listProducts(tenantId: string, query?: PublicCatalogQueryDto) {
+    return this.productsService.listPublicCatalog(tenantId, query);
+  }
+
+  getFacets(tenantId: string) {
+    return this.productsService.getPublicCatalogFacets(tenantId);
   }
 
   getProductBySlug(tenantId: string, slug: string) {

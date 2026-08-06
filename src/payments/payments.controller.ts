@@ -3,6 +3,7 @@ import {
   Delete,
   Get,
   Param,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -16,6 +17,7 @@ import { Feature } from '../common/enums/feature.enum';
 import { TenantId } from '../common/decorators/tenant-id.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { PaymentsService } from './payments.service';
+import { PaymentWebhookDispatcherService } from './payment-webhook-dispatcher.service';
 
 @ApiTags('payments')
 @ApiBearerAuth()
@@ -24,11 +26,27 @@ import { PaymentsService } from './payments.service';
 @Roles('admin', 'staff')
 @Controller('payments')
 export class PaymentsController {
-  constructor(private readonly payments: PaymentsService) {}
+  constructor(
+    private readonly payments: PaymentsService,
+    private readonly webhookDispatcher: PaymentWebhookDispatcherService,
+  ) {}
 
   @Get()
   findAll(@TenantId() tenantId: string, @Query() q: PaginationQueryDto) {
     return this.payments.findAll(tenantId, q.page, q.limit);
+  }
+
+  // Loop 10 — DLQ visibility: `FailedWebhook` existed since retries were added but had zero reader
+  // anywhere in the codebase. Listed here (before `:id`) so it's discoverable, not just repayable
+  // by a known id via curl.
+  @Get('failed-webhooks')
+  listFailedWebhooks(@TenantId() tenantId: string) {
+    return this.webhookDispatcher.listFailedWebhooks(tenantId);
+  }
+
+  @Post('failed-webhooks/:id/replay')
+  replayFailedWebhook(@TenantId() tenantId: string, @Param('id') id: string) {
+    return this.webhookDispatcher.replayFailedWebhook(tenantId, id);
   }
 
   @Get(':id')

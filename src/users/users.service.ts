@@ -359,17 +359,32 @@ export class UsersService {
   async update(
     tenantId: string,
     id: string,
-    patch: Partial<{ name: string; role: UserRole; password: string }>,
+    patch: Partial<{
+      name: string;
+      role: UserRole;
+      password: string;
+      assignedLocationId: string | null;
+    }>,
   ) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException('User not found');
     const update: Record<string, unknown> = {};
+    const unset: Record<string, ''> = {};
     if (patch.name !== undefined) update.name = patch.name;
     if (patch.role !== undefined) update.role = patch.role;
     if (patch.password) update.passwordHash = await argon2.hash(patch.password);
+    if (patch.assignedLocationId !== undefined) {
+      if (patch.assignedLocationId === null) {
+        unset.assignedLocationId = '';
+      } else {
+        update.assignedLocationId = new Types.ObjectId(patch.assignedLocationId);
+      }
+    }
+    const mongoUpdate: Record<string, unknown> = { ...(Object.keys(update).length ? { $set: update } : {}) };
+    if (Object.keys(unset).length) mongoUpdate.$unset = unset;
     const doc = await this.userModel
       .findOneAndUpdate(
         { _id: new Types.ObjectId(id), tenantId: new Types.ObjectId(tenantId) },
-        update,
+        mongoUpdate,
         { new: true },
       )
       .select('-passwordHash')

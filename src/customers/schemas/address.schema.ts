@@ -1,24 +1,30 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 
-@Schema({ _id: false })
+@Schema({ _id: true })
 export class Address {
   @Prop({ trim: true })
   label?: string;
 
-  @Prop({ trim: true })
-  street?: string;
+  @Prop({ trim: true, required: true })
+  cep: string;
+
+  @Prop({ trim: true, required: true })
+  logradouro: string;
 
   @Prop({ trim: true })
-  city?: string;
+  numero?: string;
 
   @Prop({ trim: true })
-  state?: string;
+  complemento?: string;
 
-  @Prop({ trim: true })
-  zip?: string;
+  @Prop({ trim: true, required: true })
+  bairro: string;
 
-  @Prop({ trim: true, default: 'BR' })
-  country?: string;
+  @Prop({ trim: true, required: true })
+  cidade: string;
+
+  @Prop({ trim: true, required: true })
+  uf: string;
 }
 
 export const AddressSchema = SchemaFactory.createForClass(Address);

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -8,7 +8,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtUserPayload } from '../auth/jwt-user.payload';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { Audited } from '../audit/audited.decorator';
-import { CreateReturnDto } from './dto/create-return.dto';
+import { CreateReturnDto, RejectReturnDto } from './dto/create-return.dto';
 import { ReturnsService } from './returns.service';
 
 @ApiTags('returns')
@@ -46,7 +46,32 @@ export class ReturnsHistoryController {
   constructor(private readonly returns: ReturnsService) {}
 
   @Get()
-  findAll(@TenantId() tenantId: string, @Query() q: PaginationQueryDto) {
-    return this.returns.findAll(tenantId, q.page, q.limit);
+  findAll(
+    @TenantId() tenantId: string,
+    @Query() q: PaginationQueryDto,
+    @Query('status') status?: string,
+  ) {
+    return this.returns.findAll(tenantId, q.page, q.limit, status);
+  }
+
+  @Patch(':id/approve')
+  @Audited('returns.approve')
+  approve(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtUserPayload,
+    @TenantId() tenantId: string,
+  ) {
+    return this.returns.approve(tenantId, id, user.sub);
+  }
+
+  @Patch(':id/reject')
+  @Audited('returns.reject')
+  reject(
+    @Param('id') id: string,
+    @Body() dto: RejectReturnDto,
+    @CurrentUser() user: JwtUserPayload,
+    @TenantId() tenantId: string,
+  ) {
+    return this.returns.reject(tenantId, id, user.sub, dto.note);
   }
 }

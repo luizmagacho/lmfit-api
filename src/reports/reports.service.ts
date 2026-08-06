@@ -6,6 +6,8 @@ import { Product } from '../products/schemas/product.schema';
 import { ProductVariant } from '../products/schemas/product-variant.schema';
 import { Purchase } from '../purchases/schemas/purchase.schema';
 import { ProductionBatch } from '../production/schemas/production-batch.schema';
+import { Promotion } from '../promotions/schemas/promotion.schema';
+import { Influencer } from '../influencers/schemas/influencer.schema';
 
 export type ReportsRange = { from: Date; to: Date };
 
@@ -19,6 +21,8 @@ export class ReportsService {
     @InjectModel(Purchase.name) private readonly purchaseModel: Model<Purchase>,
     @InjectModel(ProductionBatch.name)
     private readonly batchModel: Model<ProductionBatch>,
+    @InjectModel(Promotion.name) private readonly promotionModel: Model<Promotion>,
+    @InjectModel(Influencer.name) private readonly influencerModel: Model<Influencer>,
   ) {}
 
   private utcDayRange(ref: Date): { from: Date; to: Date } {
@@ -210,6 +214,90 @@ export class ReportsService {
           sku: (firstVar as { sku?: string } | null)?.sku ?? '',
           revenue: Math.round(r.revenue * 100) / 100,
           units: r.units,
+        };
+      }),
+    );
+
+    return {
+      range: { from: range.from.toISOString(), to: range.to.toISOString() },
+      items,
+    };
+  }
+
+  /**
+   * GET /reports/sales-by-influencer
+   * Vendas atribuídas por influenciador (Programa de Influenciadores) — cruza `Order.couponCode`
+   * (string denormalizada, `Order` não guarda `promotionId`) com `Promotion.influencerId`.
+   * Receita = quantity × unitPrice (mesma definição de `revenueByProduct`, não `order.total`, que
+   * já embute o desconto do próprio cupom). Pedidos cujo cupom não tem mais promoção
+   * correspondente (excluída) ou cuja promoção não tem influenciador (cupom comum) são excluídos
+   * do agrupamento, não quebram a agregação.
+   */
+  async salesByInfluencer(tenantId: string, range: ReportsRange, limit = 10) {
+    const tenantObjectId = new Types.ObjectId(tenantId);
+    const rows = await this.orderModel
+      .aggregate<{ _id: Types.ObjectId; revenue: number; units: number; orderCount: number }>([
+        {
+          $match: {
+            tenantId: tenantObjectId,
+            createdAt: { $gte: range.from, $lte: range.to },
+            status: { $in: ['completed'] as const },
+            couponCode: { $exists: true, $ne: null },
+          },
+        },
+        {
+          $lookup: {
+            from: 'promotions',
+            let: { code: '$couponCode' },
+            pipeline: [
+              {
+                $match: {
+                  $expr: { $and: [{ $eq: ['$tenantId', tenantObjectId] }, { $eq: ['$code', '$$code'] }] },
+                },
+              },
+            ],
+            as: 'promo',
+          },
+        },
+        // Cupom cuja promoção foi excluída desde a venda: some do agrupamento em vez de quebrar.
+        { $unwind: { path: '$promo', preserveNullAndEmptyArrays: false } },
+        // Cupom comum (sem influenciador vinculado) não entra neste relatório.
+        { $match: { 'promo.influencerId': { $exists: true, $ne: null } } },
+        { $unwind: '$lines' },
+        {
+          $group: {
+            _id: '$promo.influencerId',
+            revenue: { $sum: { $multiply: ['$lines.quantity', '$lines.unitPrice'] } },
+            units: { $sum: '$lines.quantity' },
+            orderIds: { $addToSet: '$_id' },
+          },
+        },
+        {
+          $project: {
+            _id: 1,
+            revenue: 1,
+            units: 1,
+            orderCount: { $size: '$orderIds' },
+          },
+        },
+        { $sort: { revenue: -1 } },
+        { $limit: limit },
+      ])
+      .exec();
+
+    const items = await Promise.all(
+      rows.map(async (r) => {
+        const influencer = await this.influencerModel
+          .findOne({ _id: r._id, tenantId: tenantObjectId })
+          .select({ name: 1 })
+          .lean()
+          .exec();
+        return {
+          influencerId: String(r._id),
+          name: (influencer as { name?: string } | null)?.name ?? '(influenciador removido)',
+          revenue: Math.round(r.revenue * 100) / 100,
+          units: r.units,
+          orderCount: r.orderCount,
         };
       }),
     );

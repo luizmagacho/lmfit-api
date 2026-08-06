@@ -22,6 +22,7 @@ import { InboundMessageProcessor } from './inbound-message.processor';
 import { WhatsappMessagesService } from './whatsapp-messages.service';
 
 import { TenantsService } from '../tenants/tenants.service';
+import { EncryptionService } from '../common/encryption.service';
 
 @ApiTags('webhooks')
 @SkipThrottle()
@@ -34,6 +35,7 @@ export class WhatsappWebhookController {
     private readonly messages: WhatsappMessagesService,
     private readonly processor: InboundMessageProcessor,
     private readonly tenants: TenantsService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   @Get()
@@ -46,11 +48,15 @@ export class WhatsappWebhookController {
     const tenant = await this.tenants.findBySlug(slug);
     if (!tenant) throw new ForbiddenException();
 
-    let expected = tenant.metaWhatsappVerifyToken;
+    // Loop 11-A — metaWhatsappVerifyToken agora é salvo criptografado; decrypt() é um no-op seguro
+    // pra valores legados que ainda estejam em texto plano (mesmo contrato do Loop 18).
+    let expected = tenant.metaWhatsappVerifyToken
+      ? this.encryption.decrypt(tenant.metaWhatsappVerifyToken)
+      : undefined;
     if (!expected) {
       expected = this.config.get<string>('META_WHATSAPP_VERIFY_TOKEN');
     }
-    
+
     if (mode === 'subscribe' && token && expected && token === expected) {
       return challenge;
     }
@@ -68,7 +74,9 @@ export class WhatsappWebhookController {
     const tenant = await this.tenants.findBySlug(slug);
     if (!tenant) throw new ForbiddenException();
 
-    let secret = tenant.metaAppSecret;
+    let secret = tenant.metaAppSecret
+      ? this.encryption.decrypt(tenant.metaAppSecret)
+      : undefined;
     if (!secret) {
       secret = this.config.get<string>('META_APP_SECRET');
     }

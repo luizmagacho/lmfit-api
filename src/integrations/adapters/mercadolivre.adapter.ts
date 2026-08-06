@@ -1,9 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
+import * as crypto from 'crypto';
 import { PlatformAdapter, StockUpdate, StockUpdateResult } from './platform-adapter.interface';
 import { IntegrationPlatform, IntegrationCredentials } from '../schemas/integration.schema';
 
 const API_BASE = 'https://api.mercadolibre.com';
+export type OAuthTokenRefreshResult = { ok: boolean; accessToken?: string; refreshToken?: string; error?: string };
 
 /**
  * Mercado Livre integration.
@@ -19,7 +21,59 @@ const API_BASE = 'https://api.mercadolibre.com';
 @Injectable()
 export class MercadoLivreAdapter implements PlatformAdapter {
   platform: IntegrationPlatform = 'mercadolivre';
+  /** Real, documentado pela ML: `x-signature: ts=...,v1=...` nas notificações de webhook v2. */
+  readonly webhookSignatureHeader = 'x-signature';
   private readonly logger = new Logger(MercadoLivreAdapter.name);
+
+  /**
+   * Verifica `x-signature` de uma notificação ML — formato `ts=<unix>,v1=<hex>`. O manifest
+   * assinado é `id:{resourceId};request-id:{xRequestId};ts:{ts};`, HMAC-SHA256 com o client
+   * secret do app. Não testado contra uma conta real (sem sandbox disponível aqui) — validar o
+   * manifest exato na doc da ML antes de confiar em produção.
+   */
+  verifyWebhookSignature(payload: Buffer, signatureHeader: string, secret: string, resourceId?: string, requestId?: string): boolean {
+    if (!signatureHeader) return false;
+    const parts = Object.fromEntries(
+      signatureHeader.split(',').map((p) => {
+        const [k, v] = p.split('=');
+        return [k?.trim(), v?.trim()];
+      }),
+    );
+    const ts = parts.ts;
+    const v1 = parts.v1;
+    if (!ts || !v1) return false;
+    const manifest = `id:${resourceId ?? ''};request-id:${requestId ?? ''};ts:${ts};`;
+    const expected = crypto.createHmac('sha256', secret).update(manifest).digest('hex');
+    try {
+      return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(v1));
+    } catch {
+      return false;
+    }
+  }
+
+  /** OAuth2 refresh_token grant — client_id/client_secret mapeados em `applicationKey`/`apiKey` (mesma convenção do TikTok adapter). */
+  async refreshAccessToken(clientId: string, clientSecret: string, refreshToken: string): Promise<OAuthTokenRefreshResult> {
+    try {
+      const res = await axios.post(
+        `${API_BASE}/oauth/token`,
+        new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: refreshToken,
+        }),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15_000 },
+      );
+      if (!res.data?.access_token) {
+        return { ok: false, error: 'Resposta sem access_token' };
+      }
+      return { ok: true, accessToken: res.data.access_token, refreshToken: res.data.refresh_token };
+    } catch (error: any) {
+      const message = error.response?.data?.message ?? error.message;
+      this.logger.error(`Mercado Livre token refresh failed: ${message}`);
+      return { ok: false, error: message };
+    }
+  }
 
   async testConnection(credentials: IntegrationCredentials): Promise<{ ok: boolean; storeName?: string; error?: string }> {
     if (!credentials.accessToken) {

@@ -25,6 +25,12 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       throw new UnauthorizedException();
     }
     const role = normalizeRoleForJwt(payload.role as UserRole);
-    return { sub: payload.sub, email: payload.email, role, tenantId: payload.tenantId };
+    return {
+      sub: payload.sub,
+      email: payload.email,
+      role,
+      tenantId: payload.tenantId,
+      locationId: payload.locationId,
+    };
   }
 }

@@ -44,6 +44,11 @@ export class StockLedger {
 
   @Prop({ type: Types.ObjectId, ref: 'User' })
   createdBy?: Types.ObjectId;
+
+  /** Local onde o movimento ocorreu (PDV offline) — ausente para movimentos sem local
+   *  específico, que continuam caindo no local padrão do tenant (ver LocationsService.adjust). */
+  @Prop({ type: Types.ObjectId, ref: 'Location' })
+  locationId?: Types.ObjectId;
 }
 
 export const StockLedgerSchema = SchemaFactory.createForClass(StockLedger);
