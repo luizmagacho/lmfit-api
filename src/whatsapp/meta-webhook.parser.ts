@@ -3,6 +3,10 @@ export type ParsedInbound = {
   fromWaId: string;
   type: string;
   textBody?: string;
+  /** Loop 12-A — mensagem de voz: a Meta nunca manda o áudio em si, só um ID de mídia (precisa de
+   *  uma chamada separada na Graph API pra baixar de verdade, ver `WhatsappMediaService`). */
+  audioMediaId?: string;
+  audioMimeType?: string;
 };
 
 export function extractInboundMessages(
@@ -28,11 +32,14 @@ export function extractInboundMessages(
         const text =
           (msg.text as { body?: string } | undefined)?.body ??
           (typeof msg.body === 'string' ? msg.body : undefined);
+        const audio = msg.audio as { id?: string; mime_type?: string } | undefined;
         out.push({
           wamid: id,
           fromWaId: from,
           type,
           textBody: text,
+          audioMediaId: audio?.id,
+          audioMimeType: audio?.mime_type,
         });
       }
     }

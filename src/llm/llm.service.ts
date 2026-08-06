@@ -15,11 +15,12 @@ export type LlmIntentResult = {
     reference?: string;
     notes?: string;
     lines?: Array<{
-      variantId?: string;
       description?: string;
+      size?: string;
+      color?: string;
       qty?: number;
-      unitPrice?: number;
     }>;
+    paymentMethod?: 'pix' | 'cash' | 'card';
     total?: number;
     orderStatus?: 'open' | 'picking' | 'shipped' | 'completed' | 'cancelled';
     purchaseStatus?: 'pending' | 'received' | 'cancelled';
@@ -27,8 +28,8 @@ export type LlmIntentResult = {
 };
 
 const INTENT_SYSTEM = `You are an assistant for a Brazilian retail ERP. Parse the user message and reply with ONLY valid JSON (no markdown) matching this shape:
-{"intent":"CREATE_ORDER"|"CREATE_PURCHASE"|"UNKNOWN","confidence":0-1,"needs_clarification":boolean,"clarifying_questions":string[],"entities":{"customerHint"?:string,"supplierHint"?:string,"customerId"?:string,"supplierId"?:string,"reference"?:string,"notes"?:string,"lines"?:[{"variantId"?:string,"description"?:string,"qty"?:number,"unitPrice"?:number}],"total"?:number,"orderStatus"?:string,"purchaseStatus"?:string}}
-Rules: For CREATE_ORDER every line must include variantId (Mongo ObjectId string) if the user did not give one, set needs_clarification true. For CREATE_PURCHASE require supplierId or supplierHint.`;
+{"intent":"CREATE_ORDER"|"CREATE_PURCHASE"|"UNKNOWN","confidence":0-1,"needs_clarification":boolean,"clarifying_questions":string[],"entities":{"customerHint"?:string,"supplierHint"?:string,"customerId"?:string,"supplierId"?:string,"reference"?:string,"notes"?:string,"lines"?:[{"description"?:string,"size"?:string,"color"?:string,"qty"?:number}],"paymentMethod"?:"pix"|"cash"|"card","total"?:number,"orderStatus"?:string,"purchaseStatus"?:string}}
+Rules: For CREATE_ORDER, never invent a variantId or a price — just describe each product in "description" (name/team/model, in the user's own words) plus "size"/"color" if they said it; a separate system resolves the real catalog item and price from that text, so don't ask the user to repeat it more precisely. If "qty" isn't said, omit it (defaults to 1). Extract "paymentMethod" only if the user actually said how they were paid ("pix" → "pix", "dinheiro" → "cash", "cartão" → "card"); omit it otherwise. For CREATE_PURCHASE require supplierId or supplierHint.`;
 
 const CASHFLOW_SYSTEM = `You are a financial AI agent for a Brazilian fitness fashion store called LM FIT.
 Analyze the provided financial transaction and reply with ONLY valid JSON (no markdown) in this exact format:
@@ -144,6 +145,37 @@ export class LlmService {
       this.log.error('chatReplyWithAction failed', e as Error);
       return { reply: 'Desculpe, não consegui responder agora. Tente novamente em instantes.', actions: [] };
     }
+  }
+
+  /**
+   * Loop 12-A — transcreve um áudio (venda/compra ditada por voz no WhatsApp) pra texto, que daí
+   * em diante segue pro MESMO `parseIntent` de sempre — o resto do pipeline nunca precisa saber
+   * que a mensagem original era voz, não texto. Endpoint separado do de chat (mesma chave/conta),
+   * confirmado ao vivo contra a Groq antes de escrever este método.
+   */
+  async transcribeAudio(audio: Buffer, mimeType: string): Promise<string> {
+    const { apiKey, baseUrl } = this.getSettings();
+    if (!apiKey) {
+      throw new Error('LLM_API_KEY not configured');
+    }
+    const model = this.config.get<string>('LLM_TRANSCRIPTION_MODEL') ?? 'whisper-large-v3-turbo';
+    // Groq classifies the upload by the FILENAME extension, not the multipart Content-Type —
+    // a generic 'audio' filename (no extension) fails with a 400 even for a supported format.
+    const extension = mimeType.split('/')[1]?.split(';')[0]?.trim() || 'ogg';
+    const form = new FormData();
+    form.append('file', new Blob([new Uint8Array(audio)], { type: mimeType }), `audio.${extension}`);
+    form.append('model', model);
+    form.append('language', 'pt');
+
+    const res = await axios.post(`${baseUrl}/audio/transcriptions`, form, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      timeout: 30_000,
+    });
+    const text = res.data?.text;
+    if (typeof text !== 'string') {
+      throw new Error('Empty transcription response');
+    }
+    return text.trim();
   }
 
   async parseIntent(text: string): Promise<LlmIntentResult> {

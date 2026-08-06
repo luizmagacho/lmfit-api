@@ -28,6 +28,16 @@ export class WhatsAppMessage {
   @Prop({ trim: true })
   textBody?: string;
 
+  /** Loop 12-A — venda/compra por áudio. `audioMediaId` é só o ID que a Meta manda; o áudio de
+   *  verdade precisa de uma chamada separada na Graph API pra baixar (`WhatsappMediaService`).
+   *  `textBody` acaba preenchido com a transcrição depois que `InboundMessageProcessor` processa
+   *  o áudio — daí em diante o resto do pipeline não sabe (nem precisa saber) que veio de voz. */
+  @Prop({ trim: true })
+  audioMediaId?: string;
+
+  @Prop({ trim: true })
+  audioMimeType?: string;
+
   @Prop({ type: Object })
   rawPayload: Record<string, unknown>;
 

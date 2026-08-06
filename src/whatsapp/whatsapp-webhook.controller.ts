@@ -100,13 +100,17 @@ export class WhatsappWebhookController {
       return {};
     }
     for (const m of inbound) {
-      if (!m.textBody?.trim()) continue;
+      // Loop 12-A — mensagem de voz nunca tem textBody (a Meta só manda um ID de mídia); deixa
+      // passar mesmo sem texto quando é áudio, senão a mensagem nem chega a ser criada/processada.
+      if (!m.textBody?.trim() && !m.audioMediaId) continue;
       const created = await this.messages.createInbound({
         tenantId: tenant._id.toString(),
         wamid: m.wamid,
         fromWaId: m.fromWaId,
         type: m.type,
         textBody: m.textBody,
+        audioMediaId: m.audioMediaId,
+        audioMimeType: m.audioMimeType,
         rawPayload: body,
       });
       if (!created) continue;

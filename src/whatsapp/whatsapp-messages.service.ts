@@ -21,6 +21,8 @@ export class WhatsappMessagesService {
     fromWaId: string;
     type: string;
     textBody?: string;
+    audioMediaId?: string;
+    audioMimeType?: string;
     rawPayload: Record<string, unknown>;
   }) {
     try {
@@ -45,6 +47,7 @@ export class WhatsappMessagesService {
         | 'linkedOrderId'
         | 'linkedPurchaseId'
         | 'error'
+        | 'textBody'
       >
     >,
   ) {
