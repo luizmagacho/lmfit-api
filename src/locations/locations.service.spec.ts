@@ -24,9 +24,13 @@ function statefulStockLevelModel() {
     _seedVariantMeta: (variantId: Types.ObjectId, meta: { sku: string; productName: string; color?: string; size?: string }) =>
       variantMeta.set(variantId.toString(), meta),
 
-    find: jest.fn((filter: { tenantId: Types.ObjectId; locationId: Types.ObjectId; quantity?: { $gt: number } }) => {
+    find: jest.fn((filter: { tenantId: Types.ObjectId; locationId?: Types.ObjectId; quantity?: { $gt: number } }) => {
       const rows = [...store.entries()]
-        .filter(([, v]) => v.locationId.equals(filter.locationId) && (filter.quantity?.$gt === undefined || v.quantity > filter.quantity.$gt))
+        .filter(
+          ([, v]) =>
+            (filter.locationId === undefined || v.locationId.equals(filter.locationId)) &&
+            (filter.quantity?.$gt === undefined || v.quantity > filter.quantity.$gt),
+        )
         .map(([, v]) => {
           const meta = variantMeta.get(v.variantId.toString());
           return {
@@ -37,6 +41,7 @@ function statefulStockLevelModel() {
               size: meta?.size,
               productId: { name: meta?.productName ?? '' },
             },
+            locationId: v.locationId,
             quantity: v.quantity,
           };
         });
@@ -353,7 +358,7 @@ describe('LocationsService.reserveUpToAvailable — atomic partial-fill (Loop PD
 /** Supports both call shapes `LocationsService` needs from the `Location` model:
  *  `getOrCreateDefault()`'s bare `.findOne(...).exec()` and `transfer()`'s
  *  `.findOne(...).lean().exec()` existence check. */
-function richLocationModelStub(locations: Array<{ _id: Types.ObjectId; isDefault?: boolean }>) {
+function richLocationModelStub(locations: Array<{ _id: Types.ObjectId; name?: string; isDefault?: boolean }>) {
   const match = (filter: any) => {
     if (filter._id) return locations.find((l) => l._id.equals(filter._id)) ?? null;
     if (filter.isDefault) return locations.find((l) => l.isDefault) ?? null;
@@ -363,6 +368,9 @@ function richLocationModelStub(locations: Array<{ _id: Types.ObjectId; isDefault
     findOne: jest.fn((filter: any) => ({
       exec: jest.fn(async () => match(filter)),
       lean: () => ({ exec: jest.fn(async () => match(filter)) }),
+    })),
+    find: jest.fn(() => ({
+      sort: () => ({ lean: () => ({ exec: jest.fn(async () => locations) }) }),
     })),
   };
 }
@@ -549,5 +557,142 @@ describe('LocationsService.backfillFromOnHand — one-time repair for initial-in
     const service = new LocationsService(locationModel as any, stockLevelModel as any, variants as any);
 
     await expect(service.backfillFromOnHand(tenantId, targetLocationId.toString())).rejects.toThrow();
+  });
+});
+
+describe('LocationsService.transferBatch — multiple variants/sizes in one transfer', () => {
+  const tenantId = new Types.ObjectId().toString();
+  const fromLocationId = new Types.ObjectId();
+  const toLocationId = new Types.ObjectId();
+  const variantP = new Types.ObjectId();
+  const variantM = new Types.ObjectId();
+  const variantG = new Types.ObjectId();
+
+  it('moves every item in one call — e.g. Legging Preta P/M/G all at once', async () => {
+    const stockLevelModel = statefulStockLevelModel();
+    const locationModel = richLocationModelStub([{ _id: fromLocationId }, { _id: toLocationId }]);
+    const service = new LocationsService(locationModel as any, stockLevelModel as any, {} as any);
+    const tid = new Types.ObjectId(tenantId);
+    stockLevelModel._seed({ tenantId: tid, variantId: variantP, locationId: fromLocationId }, 5);
+    stockLevelModel._seed({ tenantId: tid, variantId: variantM, locationId: fromLocationId }, 4);
+    stockLevelModel._seed({ tenantId: tid, variantId: variantG, locationId: fromLocationId }, 5);
+
+    const result = await service.transferBatch(tenantId, {
+      fromLocationId: fromLocationId.toString(),
+      toLocationId: toLocationId.toString(),
+      items: [
+        { variantId: variantP.toString(), quantity: 5 },
+        { variantId: variantM.toString(), quantity: 4 },
+        { variantId: variantG.toString(), quantity: 5 },
+      ],
+    });
+
+    expect(result).toEqual({
+      transferred: 3,
+      items: [
+        { variantId: variantP.toString(), quantity: 5 },
+        { variantId: variantM.toString(), quantity: 4 },
+        { variantId: variantG.toString(), quantity: 5 },
+      ],
+    });
+    expect(stockLevelModel._get({ tenantId: tid, variantId: variantP, locationId: fromLocationId })).toBe(0);
+    expect(stockLevelModel._get({ tenantId: tid, variantId: variantP, locationId: toLocationId })).toBe(5);
+    expect(stockLevelModel._get({ tenantId: tid, variantId: variantM, locationId: toLocationId })).toBe(4);
+    expect(stockLevelModel._get({ tenantId: tid, variantId: variantG, locationId: toLocationId })).toBe(5);
+  });
+
+  it('rejects the whole batch up front (moves nothing) when any single item lacks enough stock', async () => {
+    const stockLevelModel = statefulStockLevelModel();
+    const locationModel = richLocationModelStub([{ _id: fromLocationId }, { _id: toLocationId }]);
+    const service = new LocationsService(locationModel as any, stockLevelModel as any, {} as any);
+    const tid = new Types.ObjectId(tenantId);
+    stockLevelModel._seed({ tenantId: tid, variantId: variantP, locationId: fromLocationId }, 5);
+    stockLevelModel._seed({ tenantId: tid, variantId: variantM, locationId: fromLocationId }, 2); // short by 2
+
+    await expect(
+      service.transferBatch(tenantId, {
+        fromLocationId: fromLocationId.toString(),
+        toLocationId: toLocationId.toString(),
+        items: [
+          { variantId: variantP.toString(), quantity: 5 },
+          { variantId: variantM.toString(), quantity: 4 },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        conflicts: [{ variantId: variantM.toString(), needed: 4, available: 2 }],
+      },
+    });
+
+    // Nothing moved — not even variantP, which alone had enough.
+    expect(stockLevelModel._get({ tenantId: tid, variantId: variantP, locationId: fromLocationId })).toBe(5);
+    expect(stockLevelModel._get({ tenantId: tid, variantId: variantP, locationId: toLocationId })).toBe(0);
+  });
+
+  it('rejects transferring between the same location twice', async () => {
+    const stockLevelModel = statefulStockLevelModel();
+    const locationModel = richLocationModelStub([{ _id: fromLocationId }]);
+    const service = new LocationsService(locationModel as any, stockLevelModel as any, {} as any);
+
+    await expect(
+      service.transferBatch(tenantId, {
+        fromLocationId: fromLocationId.toString(),
+        toLocationId: fromLocationId.toString(),
+        items: [{ variantId: variantP.toString(), quantity: 1 }],
+      }),
+    ).rejects.toThrow();
+  });
+});
+
+describe('LocationsService.stockMatrix — every variant × every location in one grid', () => {
+  const tenantId = new Types.ObjectId().toString();
+  const locationA = new Types.ObjectId();
+  const locationB = new Types.ObjectId();
+  const variantId = new Types.ObjectId();
+
+  it('pivots stock by location per variant, with a color/size displayName', async () => {
+    const stockLevelModel = statefulStockLevelModel();
+    const locationModel = richLocationModelStub([
+      { _id: locationA, name: 'Banca Brás', isDefault: true },
+      { _id: locationB, name: 'Estoque' },
+    ]);
+    const service = new LocationsService(locationModel as any, stockLevelModel as any, {} as any);
+    const tid = new Types.ObjectId(tenantId);
+    stockLevelModel._seed({ tenantId: tid, variantId, locationId: locationA }, 5);
+    stockLevelModel._seed({ tenantId: tid, variantId, locationId: locationB }, 3);
+    stockLevelModel._seedVariantMeta(variantId, { sku: 'LEG-PRE-M', productName: 'Legging Preta', color: 'Preta', size: 'M' });
+
+    const result = await service.stockMatrix(tenantId);
+
+    expect(result.locations).toEqual([
+      { _id: locationA.toString(), name: 'Banca Brás', isDefault: true },
+      { _id: locationB.toString(), name: 'Estoque', isDefault: false },
+    ]);
+    expect(result.items).toEqual([
+      {
+        variantId: variantId.toString(),
+        sku: 'LEG-PRE-M',
+        productName: 'Legging Preta',
+        color: 'Preta',
+        size: 'M',
+        displayName: 'Legging Preta — Preta — M',
+        byLocation: { [locationA.toString()]: 5, [locationB.toString()]: 3 },
+        total: 8,
+      },
+    ]);
+  });
+
+  it('never shows a location the variant has zero stock at', async () => {
+    const stockLevelModel = statefulStockLevelModel();
+    const locationModel = richLocationModelStub([{ _id: locationA }, { _id: locationB }]);
+    const service = new LocationsService(locationModel as any, stockLevelModel as any, {} as any);
+    const tid = new Types.ObjectId(tenantId);
+    stockLevelModel._seed({ tenantId: tid, variantId, locationId: locationA }, 5);
+    stockLevelModel._seed({ tenantId: tid, variantId, locationId: locationB }, 0);
+    stockLevelModel._seedVariantMeta(variantId, { sku: 'LEG-PRE-M', productName: 'Legging Preta' });
+
+    const result = await service.stockMatrix(tenantId);
+
+    expect(result.items[0].byLocation).toEqual({ [locationA.toString()]: 5 });
   });
 });

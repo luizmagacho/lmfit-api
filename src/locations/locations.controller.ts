@@ -11,6 +11,7 @@ import { CreateLocationDto } from './dto/create-location.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { TransferStockDto } from './dto/transfer-stock.dto';
 import { AllocateStockDto } from './dto/allocate-stock.dto';
+import { TransferBatchStockDto } from './dto/transfer-batch-stock.dto';
 
 @ApiTags('locations')
 @ApiBearerAuth()
@@ -31,10 +32,23 @@ export class LocationsController {
     return this.locations.findAll(tenantId);
   }
 
+  /** Registered before the `:id` routes below — otherwise Nest would match "stock-matrix"
+   *  as a location id. */
+  @Get('stock-matrix')
+  stockMatrix(@TenantId() tenantId: string) {
+    return this.locations.stockMatrix(tenantId);
+  }
+
   @Post('transfer')
   @Audited('locations.transfer')
   transfer(@TenantId() tenantId: string, @Body() dto: TransferStockDto) {
     return this.locations.transfer(tenantId, dto);
+  }
+
+  @Post('transfer-batch')
+  @Audited('locations.transferBatch')
+  transferBatch(@TenantId() tenantId: string, @Body() dto: TransferBatchStockDto) {
+    return this.locations.transferBatch(tenantId, dto);
   }
 
   @Post('allocate')

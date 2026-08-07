@@ -13,6 +13,7 @@ import type { CreateLocationDto } from './dto/create-location.dto';
 import type { UpdateLocationDto } from './dto/update-location.dto';
 import type { TransferStockDto } from './dto/transfer-stock.dto';
 import type { AllocateStockDto } from './dto/allocate-stock.dto';
+import type { TransferBatchStockDto } from './dto/transfer-batch-stock.dto';
 
 const DEFAULT_LOCATION_NAME = 'Loja Principal';
 
@@ -261,6 +262,88 @@ export class LocationsService {
     return { transferred: dto.quantity };
   }
 
+  /**
+   * Same move as `transfer()`, but for several variants at once — e.g. sending every size of
+   * Legging Preta plus every size of Legging Branca to Banca Brás in a single action instead
+   * of one call per SKU. Fails the whole batch up front if any item doesn't have enough stock
+   * (no partial transfers from the caller's perspective, matching the same guarded-decrement
+   * safety `transfer()` already has). If a later item still loses a decrement race against a
+   * concurrent transfer despite passing the pre-check (rare — same variant, same instant),
+   * everything already moved in this batch is rolled back rather than left half-done — there's
+   * no multi-document transaction in this codebase to fall back on, so the rollback is explicit.
+   */
+  async transferBatch(tenantId: string, dto: TransferBatchStockDto) {
+    if (dto.fromLocationId === dto.toLocationId) {
+      throw new BadRequestException('Origem e destino não podem ser o mesmo local');
+    }
+    const tid = new Types.ObjectId(tenantId);
+    const fromId = new Types.ObjectId(dto.fromLocationId);
+    const toId = new Types.ObjectId(dto.toLocationId);
+
+    const [fromLocation, toLocation] = await Promise.all([
+      this.model.findOne({ _id: fromId, tenantId: tid }).lean().exec(),
+      this.model.findOne({ _id: toId, tenantId: tid }).lean().exec(),
+    ]);
+    if (!fromLocation || !toLocation) throw new NotFoundException('Local não encontrado');
+
+    const conflicts: Array<{ variantId: string; needed: number; available: number }> = [];
+    for (const item of dto.items) {
+      const row = await this.stockLevelModel
+        .findOne({ tenantId: tid, variantId: new Types.ObjectId(item.variantId), locationId: fromId })
+        .lean()
+        .exec();
+      const available = row?.quantity ?? 0;
+      if (available < item.quantity) {
+        conflicts.push({ variantId: item.variantId, needed: item.quantity, available });
+      }
+    }
+    if (conflicts.length) {
+      throw new BadRequestException({
+        message: 'Estoque insuficiente no local de origem para um ou mais itens da transferência',
+        conflicts,
+      });
+    }
+
+    const committed: Array<{ variantId: Types.ObjectId; quantity: number }> = [];
+    try {
+      for (const item of dto.items) {
+        const vid = new Types.ObjectId(item.variantId);
+        const decremented = await this.stockLevelModel
+          .findOneAndUpdate(
+            { tenantId: tid, variantId: vid, locationId: fromId, quantity: { $gte: item.quantity } },
+            { $inc: { quantity: -item.quantity } },
+          )
+          .exec();
+        if (!decremented) {
+          throw new BadRequestException(
+            `Estoque insuficiente no local de origem para ${item.variantId} (alterado por outra transferência simultânea)`,
+          );
+        }
+        await this.stockLevelModel.updateOne(
+          { tenantId: tid, variantId: vid, locationId: toId },
+          { $inc: { quantity: item.quantity } },
+          { upsert: true },
+        );
+        committed.push({ variantId: vid, quantity: item.quantity });
+      }
+    } catch (e) {
+      for (const c of committed) {
+        await this.stockLevelModel.updateOne(
+          { tenantId: tid, variantId: c.variantId, locationId: fromId },
+          { $inc: { quantity: c.quantity } },
+          { upsert: true },
+        );
+        await this.stockLevelModel.updateOne(
+          { tenantId: tid, variantId: c.variantId, locationId: toId },
+          { $inc: { quantity: -c.quantity } },
+        );
+      }
+      throw e;
+    }
+
+    return { transferred: dto.items.length, items: dto.items };
+  }
+
   /** Allocate stock from the tenant's central/default pool into a specific location —
    *  sugar over `transfer()` so callers don't need to know the default location's id. */
   async allocate(tenantId: string, dto: AllocateStockDto) {
@@ -357,5 +440,76 @@ export class LocationsService {
         };
       });
     return { items, total, page, limit };
+  }
+
+  /**
+   * "Onde está cada peça" numa única grade: cada variante é uma linha, cada local é uma
+   * coluna. Antes só dava pra ver um local por vez — pra saber se uma peça também estava em
+   * outro local era preciso trocar o filtro e comparar de cabeça.
+   */
+  async stockMatrix(tenantId: string) {
+    const tid = new Types.ObjectId(tenantId);
+    const [locations, rows] = await Promise.all([
+      this.model.find({ tenantId: tid }).sort({ isDefault: -1, name: 1 }).lean().exec(),
+      this.stockLevelModel
+        .find({ tenantId: tid, quantity: { $gt: 0 } })
+        .populate<{
+          variantId: {
+            _id: Types.ObjectId;
+            sku: string;
+            color?: string;
+            size?: string;
+            productId: { name: string } | null;
+          } | null;
+        }>({ path: 'variantId', select: 'sku color size productId', populate: { path: 'productId', select: 'name' } })
+        .lean()
+        .exec(),
+    ]);
+
+    const byVariant = new Map<
+      string,
+      {
+        variantId: string;
+        sku: string;
+        productName: string;
+        color?: string;
+        size?: string;
+        displayName: string;
+        byLocation: Record<string, number>;
+        total: number;
+      }
+    >();
+
+    for (const r of rows) {
+      if (!r.variantId) continue;
+      const vid = String(r.variantId._id);
+      let entry = byVariant.get(vid);
+      if (!entry) {
+        const productName = r.variantId.productId?.name ?? '';
+        const color = r.variantId.color;
+        const size = r.variantId.size;
+        const variantLabel = [color, size].filter(Boolean).join(' — ');
+        entry = {
+          variantId: vid,
+          sku: r.variantId.sku,
+          productName,
+          color,
+          size,
+          displayName: variantLabel ? `${productName} — ${variantLabel}` : productName,
+          byLocation: {},
+          total: 0,
+        };
+        byVariant.set(vid, entry);
+      }
+      entry.byLocation[String(r.locationId)] = r.quantity;
+      entry.total += r.quantity;
+    }
+
+    const items = [...byVariant.values()].sort((a, b) => a.displayName.localeCompare(b.displayName, 'pt-BR'));
+
+    return {
+      locations: locations.map((l) => ({ _id: String(l._id), name: l.name, isDefault: !!l.isDefault })),
+      items,
+    };
   }
 }
