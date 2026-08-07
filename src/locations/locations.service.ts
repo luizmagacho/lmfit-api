@@ -8,6 +8,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Location, LocationDocument } from './schemas/location.schema';
 import { StockLevel } from './schemas/stock-level.schema';
+import { ProductVariant } from '../products/schemas/product-variant.schema';
 import type { CreateLocationDto } from './dto/create-location.dto';
 import type { UpdateLocationDto } from './dto/update-location.dto';
 import type { TransferStockDto } from './dto/transfer-stock.dto';
@@ -20,6 +21,7 @@ export class LocationsService {
   constructor(
     @InjectModel(Location.name) private readonly model: Model<Location>,
     @InjectModel(StockLevel.name) private readonly stockLevelModel: Model<StockLevel>,
+    @InjectModel(ProductVariant.name) private readonly variantModel: Model<ProductVariant>,
   ) {}
 
   /** Every tenant gets exactly one default location, created lazily on first use. */
@@ -269,6 +271,40 @@ export class LocationsService {
       toLocationId: dto.toLocationId,
       quantity: dto.quantity,
     });
+  }
+
+  /**
+   * One-time repair for the gap where initial stock intake (`ProductVariant.quantityOnHand`)
+   * was never mirrored into `StockLevel` for any location — until a variant is allocated at
+   * least once, the PDV (online or offline) sees it as having zero stock everywhere, even
+   * though `quantityOnHand` says otherwise. Seeds `targetLocationId` with each such variant's
+   * current `quantityOnHand`. Only touches variants with NO existing `StockLevel` row at any
+   * location, so re-running this after real transfers/sales have happened is a no-op for them.
+   */
+  async backfillFromOnHand(tenantId: string, targetLocationId: string) {
+    if (!Types.ObjectId.isValid(targetLocationId)) throw new NotFoundException();
+    const tid = new Types.ObjectId(tenantId);
+    const lid = new Types.ObjectId(targetLocationId);
+    const location = await this.model.findOne({ _id: lid, tenantId: tid }).lean().exec();
+    if (!location) throw new NotFoundException('Local não encontrado');
+
+    const alreadyTracked = await this.stockLevelModel.distinct('variantId', { tenantId: tid }).exec();
+    const variants = await this.variantModel
+      .find({ tenantId: tid, quantityOnHand: { $gt: 0 }, _id: { $nin: alreadyTracked } })
+      .select('_id quantityOnHand')
+      .lean()
+      .exec();
+    if (!variants.length) return { seeded: 0 };
+
+    await this.stockLevelModel.insertMany(
+      variants.map((v) => ({
+        tenantId: tid,
+        variantId: v._id,
+        locationId: lid,
+        quantity: v.quantityOnHand,
+      })),
+    );
+    return { seeded: variants.length };
   }
 
   /** Everything a location has allocated (quantity > 0), with product/SKU labels —

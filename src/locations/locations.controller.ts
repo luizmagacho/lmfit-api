@@ -43,6 +43,13 @@ export class LocationsController {
     return this.locations.allocate(tenantId, dto);
   }
 
+  @Roles('admin')
+  @Post(':id/backfill-from-on-hand')
+  @Audited('locations.backfillFromOnHand')
+  backfillFromOnHand(@TenantId() tenantId: string, @Param('id') id: string) {
+    return this.locations.backfillFromOnHand(tenantId, id);
+  }
+
   @Get('stock/:variantId')
   stockByVariant(@TenantId() tenantId: string, @Param('variantId') variantId: string) {
     return this.locations.listByVariant(tenantId, variantId);

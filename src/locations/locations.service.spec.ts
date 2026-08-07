@@ -127,7 +127,7 @@ describe('LocationsService.adjust — atomic $gte guard (replaces findOne→Math
 
   it('increments unconditionally, even from zero / no existing row', async () => {
     const stockLevelModel = statefulStockLevelModel();
-    const service = new LocationsService({} as any, stockLevelModel as any);
+    const service = new LocationsService({} as any, stockLevelModel as any, {} as any);
 
     await service.adjust(tenantId, variantId, 5, locationId);
 
@@ -136,7 +136,7 @@ describe('LocationsService.adjust — atomic $gte guard (replaces findOne→Math
 
   it('decrements when enough is recorded at that location', async () => {
     const stockLevelModel = statefulStockLevelModel();
-    const service = new LocationsService({} as any, stockLevelModel as any);
+    const service = new LocationsService({} as any, stockLevelModel as any, {} as any);
     const f = { tenantId: new Types.ObjectId(tenantId), variantId, locationId };
     stockLevelModel._seed(f, 10);
 
@@ -147,7 +147,7 @@ describe('LocationsService.adjust — atomic $gte guard (replaces findOne→Math
 
   it('never goes negative under concurrent decrements racing the same location (sequential calls, same guarded path)', async () => {
     const stockLevelModel = statefulStockLevelModel();
-    const service = new LocationsService({} as any, stockLevelModel as any);
+    const service = new LocationsService({} as any, stockLevelModel as any, {} as any);
     const f = { tenantId: new Types.ObjectId(tenantId), variantId, locationId };
     stockLevelModel._seed(f, 5);
 
@@ -163,7 +163,7 @@ describe('LocationsService.adjust — atomic $gte guard (replaces findOne→Math
 
   it('clamps to zero (never throws) when the location does not have enough recorded — same drift-tolerant posture as before', async () => {
     const stockLevelModel = statefulStockLevelModel();
-    const service = new LocationsService({} as any, stockLevelModel as any);
+    const service = new LocationsService({} as any, stockLevelModel as any, {} as any);
     const f = { tenantId: new Types.ObjectId(tenantId), variantId, locationId };
     stockLevelModel._seed(f, 2);
 
@@ -174,7 +174,7 @@ describe('LocationsService.adjust — atomic $gte guard (replaces findOne→Math
 
   it('clamps to zero when no row exists yet for this location', async () => {
     const stockLevelModel = statefulStockLevelModel();
-    const service = new LocationsService({} as any, stockLevelModel as any);
+    const service = new LocationsService({} as any, stockLevelModel as any, {} as any);
     const f = { tenantId: new Types.ObjectId(tenantId), variantId, locationId };
 
     await service.adjust(tenantId, variantId, -1, locationId);
@@ -184,7 +184,7 @@ describe('LocationsService.adjust — atomic $gte guard (replaces findOne→Math
 
   it('is a no-op for a zero delta (no model calls)', async () => {
     const stockLevelModel = statefulStockLevelModel();
-    const service = new LocationsService({} as any, stockLevelModel as any);
+    const service = new LocationsService({} as any, stockLevelModel as any, {} as any);
 
     await service.adjust(tenantId, variantId, 0, locationId);
 
@@ -202,7 +202,7 @@ describe('LocationsService.transfer — atomic guarded decrement (replaces check
   it('moves stock from origin to destination when enough is available', async () => {
     const stockLevelModel = statefulStockLevelModel();
     const locationModel = locationModelStub([fromLocationId, toLocationId]);
-    const service = new LocationsService(locationModel as any, stockLevelModel as any);
+    const service = new LocationsService(locationModel as any, stockLevelModel as any, {} as any);
     const fromKey = { tenantId: new Types.ObjectId(tenantId), variantId, locationId: fromLocationId };
     const toKey = { tenantId: new Types.ObjectId(tenantId), variantId, locationId: toLocationId };
     stockLevelModel._seed(fromKey, 10);
@@ -222,7 +222,7 @@ describe('LocationsService.transfer — atomic guarded decrement (replaces check
   it('rejects (and mutates nothing) when the origin does not have enough stock', async () => {
     const stockLevelModel = statefulStockLevelModel();
     const locationModel = locationModelStub([fromLocationId, toLocationId]);
-    const service = new LocationsService(locationModel as any, stockLevelModel as any);
+    const service = new LocationsService(locationModel as any, stockLevelModel as any, {} as any);
     const fromKey = { tenantId: new Types.ObjectId(tenantId), variantId, locationId: fromLocationId };
     const toKey = { tenantId: new Types.ObjectId(tenantId), variantId, locationId: toLocationId };
     stockLevelModel._seed(fromKey, 2);
@@ -243,7 +243,7 @@ describe('LocationsService.transfer — atomic guarded decrement (replaces check
   it('never lets two concurrent transfers jointly overdraw the same origin', async () => {
     const stockLevelModel = statefulStockLevelModel();
     const locationModel = locationModelStub([fromLocationId, toLocationId]);
-    const service = new LocationsService(locationModel as any, stockLevelModel as any);
+    const service = new LocationsService(locationModel as any, stockLevelModel as any, {} as any);
     const fromKey = { tenantId: new Types.ObjectId(tenantId), variantId, locationId: fromLocationId };
     stockLevelModel._seed(fromKey, 5);
 
@@ -272,7 +272,7 @@ describe('LocationsService.reserveUpToAvailable — atomic partial-fill (Loop PD
 
   it('takes the full amount when there is enough', async () => {
     const stockLevelModel = statefulStockLevelModel();
-    const service = new LocationsService({} as any, stockLevelModel as any);
+    const service = new LocationsService({} as any, stockLevelModel as any, {} as any);
     const f = { tenantId: new Types.ObjectId(tenantId), variantId, locationId };
     stockLevelModel._seed(f, 10);
 
@@ -288,7 +288,7 @@ describe('LocationsService.reserveUpToAvailable — atomic partial-fill (Loop PD
   // mocked unit tests above, since the mock doesn't replicate Mongoose's own validation.
   it('passes {updatePipeline: true} so the real Mongoose driver accepts the pipeline update', async () => {
     const stockLevelModel = statefulStockLevelModel();
-    const service = new LocationsService({} as any, stockLevelModel as any);
+    const service = new LocationsService({} as any, stockLevelModel as any, {} as any);
     const f = { tenantId: new Types.ObjectId(tenantId), variantId, locationId };
     stockLevelModel._seed(f, 10);
 
@@ -300,7 +300,7 @@ describe('LocationsService.reserveUpToAvailable — atomic partial-fill (Loop PD
 
   it('takes only what is available and reports the smaller fulfilled amount, never going negative', async () => {
     const stockLevelModel = statefulStockLevelModel();
-    const service = new LocationsService({} as any, stockLevelModel as any);
+    const service = new LocationsService({} as any, stockLevelModel as any, {} as any);
     const f = { tenantId: new Types.ObjectId(tenantId), variantId, locationId };
     stockLevelModel._seed(f, 2);
 
@@ -312,7 +312,7 @@ describe('LocationsService.reserveUpToAvailable — atomic partial-fill (Loop PD
 
   it('returns 0 without throwing when no row exists yet for this location', async () => {
     const stockLevelModel = statefulStockLevelModel();
-    const service = new LocationsService({} as any, stockLevelModel as any);
+    const service = new LocationsService({} as any, stockLevelModel as any, {} as any);
 
     const fulfilled = await service.reserveUpToAvailable(tenantId, variantId, locationId, 3);
 
@@ -321,7 +321,7 @@ describe('LocationsService.reserveUpToAvailable — atomic partial-fill (Loop PD
 
   it('is a no-op for a zero or negative requested quantity', async () => {
     const stockLevelModel = statefulStockLevelModel();
-    const service = new LocationsService({} as any, stockLevelModel as any);
+    const service = new LocationsService({} as any, stockLevelModel as any, {} as any);
     const f = { tenantId: new Types.ObjectId(tenantId), variantId, locationId };
     stockLevelModel._seed(f, 5);
 
@@ -331,7 +331,7 @@ describe('LocationsService.reserveUpToAvailable — atomic partial-fill (Loop PD
 
   it('never lets two concurrent reservations jointly take more than what was available', async () => {
     const stockLevelModel = statefulStockLevelModel();
-    const service = new LocationsService({} as any, stockLevelModel as any);
+    const service = new LocationsService({} as any, stockLevelModel as any, {} as any);
     const f = { tenantId: new Types.ObjectId(tenantId), variantId, locationId };
     stockLevelModel._seed(f, 5);
 
@@ -374,7 +374,7 @@ describe('LocationsService.allocate — sugar over transfer() from the tenant-wi
       { _id: defaultLocationId, isDefault: true },
       { _id: targetLocationId },
     ]);
-    const service = new LocationsService(locationModel as any, stockLevelModel as any);
+    const service = new LocationsService(locationModel as any, stockLevelModel as any, {} as any);
     const defaultKey = { tenantId: new Types.ObjectId(tenantId), variantId, locationId: defaultLocationId };
     const targetKey = { tenantId: new Types.ObjectId(tenantId), variantId, locationId: targetLocationId };
     stockLevelModel._seed(defaultKey, 10);
@@ -396,7 +396,7 @@ describe('LocationsService.allocate — sugar over transfer() from the tenant-wi
       { _id: defaultLocationId, isDefault: true },
       { _id: targetLocationId },
     ]);
-    const service = new LocationsService(locationModel as any, stockLevelModel as any);
+    const service = new LocationsService(locationModel as any, stockLevelModel as any, {} as any);
     stockLevelModel._seed(
       { tenantId: new Types.ObjectId(tenantId), variantId, locationId: defaultLocationId },
       2,
@@ -421,7 +421,7 @@ describe('LocationsService.stockByLocation — what a location has allocated', (
   it('lists only variants with quantity > 0 at that specific location', async () => {
     const stockLevelModel = statefulStockLevelModel();
     const locationModel = richLocationModelStub([{ _id: locationId }, { _id: otherLocationId }]);
-    const service = new LocationsService(locationModel as any, stockLevelModel as any);
+    const service = new LocationsService(locationModel as any, stockLevelModel as any, {} as any);
     const tid = new Types.ObjectId(tenantId);
     stockLevelModel._seed({ tenantId: tid, variantId, locationId }, 6);
     stockLevelModel._seedVariantMeta(variantId, { sku: 'CAM-P', productName: 'Camiseta Básica' });
@@ -439,8 +439,86 @@ describe('LocationsService.stockByLocation — what a location has allocated', (
   it('throws NotFoundException for a location that does not belong to this tenant', async () => {
     const stockLevelModel = statefulStockLevelModel();
     const locationModel = richLocationModelStub([]);
-    const service = new LocationsService(locationModel as any, stockLevelModel as any);
+    const service = new LocationsService(locationModel as any, stockLevelModel as any, {} as any);
 
     await expect(service.stockByLocation(tenantId, locationId.toString(), 1, 20)).rejects.toThrow();
+  });
+});
+
+/** Minimal stand-in for the `ProductVariant` model — only the two calls
+ *  `backfillFromOnHand()` issues (`.find(...).select().lean().exec()`). */
+function variantModelStub(variants: Array<{ _id: Types.ObjectId; quantityOnHand: number }>) {
+  return {
+    find: jest.fn((filter: { quantityOnHand: { $gt: number }; _id: { $nin: Types.ObjectId[] } }) => ({
+      select: () => ({
+        lean: () => ({
+          exec: jest.fn(async () =>
+            variants.filter(
+              (v) =>
+                v.quantityOnHand > filter.quantityOnHand.$gt &&
+                !filter._id.$nin.some((id) => id.equals(v._id)),
+            ),
+          ),
+        }),
+      }),
+    })),
+  };
+}
+
+describe('LocationsService.backfillFromOnHand — one-time repair for initial-intake stock never mirrored into StockLevel', () => {
+  const tenantId = new Types.ObjectId().toString();
+  const targetLocationId = new Types.ObjectId();
+  const variantA = new Types.ObjectId();
+  const variantB = new Types.ObjectId();
+
+  it('seeds the target location with quantityOnHand for every untracked variant', async () => {
+    const stockLevelModel = statefulStockLevelModel();
+    (stockLevelModel as any).distinct = jest.fn(() => ({ exec: jest.fn(async () => []) }));
+    (stockLevelModel as any).insertMany = jest.fn(async (docs: any[]) => {
+      for (const d of docs) stockLevelModel._seed(d, d.quantity);
+      return docs;
+    });
+    const locationModel = richLocationModelStub([{ _id: targetLocationId }]);
+    const variants = variantModelStub([
+      { _id: variantA, quantityOnHand: 4 },
+      { _id: variantB, quantityOnHand: 7 },
+    ]);
+    const service = new LocationsService(locationModel as any, stockLevelModel as any, variants as any);
+
+    const result = await service.backfillFromOnHand(tenantId, targetLocationId.toString());
+
+    expect(result).toEqual({ seeded: 2 });
+    expect(stockLevelModel._get({ tenantId: new Types.ObjectId(tenantId), variantId: variantA, locationId: targetLocationId })).toBe(4);
+    expect(stockLevelModel._get({ tenantId: new Types.ObjectId(tenantId), variantId: variantB, locationId: targetLocationId })).toBe(7);
+  });
+
+  it('skips variants that already have a StockLevel row anywhere — safe to re-run without clobbering real transfers', async () => {
+    const stockLevelModel = statefulStockLevelModel();
+    (stockLevelModel as any).distinct = jest.fn(() => ({ exec: jest.fn(async () => [variantA]) }));
+    (stockLevelModel as any).insertMany = jest.fn(async (docs: any[]) => {
+      for (const d of docs) stockLevelModel._seed(d, d.quantity);
+      return docs;
+    });
+    const locationModel = richLocationModelStub([{ _id: targetLocationId }]);
+    const variants = variantModelStub([
+      { _id: variantA, quantityOnHand: 4 },
+      { _id: variantB, quantityOnHand: 7 },
+    ]);
+    const service = new LocationsService(locationModel as any, stockLevelModel as any, variants as any);
+
+    const result = await service.backfillFromOnHand(tenantId, targetLocationId.toString());
+
+    expect(result).toEqual({ seeded: 1 });
+    expect(stockLevelModel._get({ tenantId: new Types.ObjectId(tenantId), variantId: variantA, locationId: targetLocationId })).toBe(0);
+    expect(stockLevelModel._get({ tenantId: new Types.ObjectId(tenantId), variantId: variantB, locationId: targetLocationId })).toBe(7);
+  });
+
+  it('throws NotFoundException for a location that does not belong to this tenant', async () => {
+    const stockLevelModel = statefulStockLevelModel();
+    const locationModel = richLocationModelStub([]);
+    const variants = variantModelStub([]);
+    const service = new LocationsService(locationModel as any, stockLevelModel as any, variants as any);
+
+    await expect(service.backfillFromOnHand(tenantId, targetLocationId.toString())).rejects.toThrow();
   });
 });
