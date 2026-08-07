@@ -353,3 +353,100 @@ describe('ProductsService.reserveForOfflineSale — location + tenant-wide recon
     expect(locations.reserveUpToAvailable).not.toHaveBeenCalled();
   });
 });
+
+// Regression: initial stock entered on a new product (or edited on an existing variant) used
+// to only ever touch ProductVariant.quantityOnHand — it never became a real StockLevel row,
+// so the product was invisible in "estoque por local" until someone allocated it manually.
+// LocationsService.adjust() (already used elsewhere in this file for other stock-movement
+// paths) must be mirrored here too, at product create/update time.
+/** Chainable stand-in for a Mongoose query — every method returns another instance of the
+ *  same chain, and the chain is itself an already-resolved Promise, so it satisfies whatever
+ *  order of `.sort()/.lean()/.populate()/.exec()` the real call site happens to use. */
+function chainableResolved<T>(data: T): any {
+  const p: any = Promise.resolve(data);
+  p.lean = () => chainableResolved(data);
+  p.sort = () => chainableResolved(data);
+  p.exec = () => Promise.resolve(data);
+  p.populate = () => chainableResolved(data);
+  p.select = () => chainableResolved(data);
+  p.skip = () => chainableResolved(data);
+  p.limit = () => chainableResolved(data);
+  return p;
+}
+
+describe('ProductsService — new/edited stock is mirrored into StockLevel at the default location', () => {
+  let service: ProductsService;
+  const productId = new Types.ObjectId();
+  const variantId = new Types.ObjectId();
+  const productModel = { create: jest.fn(), findOne: jest.fn() };
+  const variantModel = {
+    find: jest.fn(),
+    findOne: jest.fn(),
+    create: jest.fn(),
+    updateOne: jest.fn(),
+  };
+  const ledgerModel = { create: jest.fn() };
+  const locations = { adjust: jest.fn() };
+  const eventEmitter = { emit: jest.fn() };
+  const tenantId = new Types.ObjectId().toString();
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    ledgerModel.create.mockResolvedValue({});
+    locations.adjust.mockResolvedValue(undefined);
+    // No existing variants for this product yet, and no SKU collisions.
+    variantModel.find.mockReturnValue(chainableResolved([]));
+    variantModel.findOne.mockReturnValue(chainableResolved(null));
+    productModel.findOne.mockReturnValue(chainableResolved({ _id: productId, variants: [] }));
+    productModel.create.mockResolvedValue({ _id: productId });
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ProductsService,
+        { provide: getModelToken(Product.name), useValue: productModel },
+        { provide: getModelToken(ProductVariant.name), useValue: variantModel },
+        { provide: getModelToken(StockLedger.name), useValue: ledgerModel },
+        { provide: ExcelSpreadsheetService, useValue: {} },
+        { provide: EventEmitter2, useValue: eventEmitter },
+        { provide: LocationsService, useValue: locations },
+      ],
+    }).compile();
+    service = module.get<ProductsService>(ProductsService);
+  });
+
+  it('mirrors a new variant\'s initial on-hand into the default location on product create', async () => {
+    variantModel.create.mockResolvedValue({ _id: variantId, toObject: () => ({}) });
+
+    await service.createProduct(tenantId, {
+      name: 'Legging Preta',
+      slug: 'legging-preta',
+      variants: [{ sku: 'LEG-PRE-M', size: 'M', priceRetail: 89.9, quantityOnHand: 12 }],
+    } as any);
+
+    expect(locations.adjust).toHaveBeenCalledWith(tenantId, variantId, 12);
+  });
+
+  it('does not call adjust for a brand-new variant with zero initial stock', async () => {
+    variantModel.create.mockResolvedValue({ _id: variantId, toObject: () => ({}) });
+
+    await service.createProduct(tenantId, {
+      name: 'Legging Preta',
+      slug: 'legging-preta',
+      variants: [{ sku: 'LEG-PRE-M', size: 'M', priceRetail: 89.9, quantityOnHand: 0 }],
+    } as any);
+
+    expect(locations.adjust).not.toHaveBeenCalled();
+  });
+
+  it('mirrors only the delta (not the raw new quantity) when an existing variant\'s stock is edited', async () => {
+    variantModel.find.mockReturnValue(chainableResolved([{ _id: variantId, productId, quantityOnHand: 5 }]));
+    variantModel.updateOne.mockReturnValue(chainableResolved({}));
+
+    await service.updateProduct(tenantId, String(productId), {
+      variants: [{ _id: String(variantId), sku: 'LEG-PRE-M', size: 'M', priceRetail: 89.9, quantityOnHand: 9 }],
+    } as any);
+
+    // 9 (new) - 5 (previous) = +4, not +9.
+    expect(locations.adjust).toHaveBeenCalledWith(tenantId, variantId, 4);
+  });
+});

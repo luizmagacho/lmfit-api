@@ -324,8 +324,14 @@ export class LocationsService {
         .skip((page - 1) * limit)
         .limit(limit)
         .populate<{
-          variantId: { _id: Types.ObjectId; sku: string; productId: { name: string } | null } | null;
-        }>({ path: 'variantId', select: 'sku productId', populate: { path: 'productId', select: 'name' } })
+          variantId: {
+            _id: Types.ObjectId;
+            sku: string;
+            color?: string;
+            size?: string;
+            productId: { name: string } | null;
+          } | null;
+        }>({ path: 'variantId', select: 'sku color size productId', populate: { path: 'productId', select: 'name' } })
         .lean()
         .exec(),
       this.stockLevelModel.countDocuments(query).exec(),
@@ -333,12 +339,23 @@ export class LocationsService {
 
     const items = rows
       .filter((r) => r.variantId != null)
-      .map((r) => ({
-        variantId: String(r.variantId!._id),
-        sku: r.variantId!.sku,
-        productName: r.variantId!.productId?.name ?? '',
-        quantity: r.quantity,
-      }));
+      .map((r) => {
+        const productName = r.variantId!.productId?.name ?? '';
+        const color = r.variantId!.color;
+        const size = r.variantId!.size;
+        const variantLabel = [color, size].filter(Boolean).join(' — ');
+        return {
+          variantId: String(r.variantId!._id),
+          sku: r.variantId!.sku,
+          productName,
+          color,
+          size,
+          /** "Produto — Cor — Tamanho" pronto pra exibir — a lista tinha várias linhas do
+           *  mesmo produto (uma por variante) distinguíveis só pelo SKU cru. */
+          displayName: variantLabel ? `${productName} — ${variantLabel}` : productName,
+          quantity: r.quantity,
+        };
+      });
     return { items, total, page, limit };
   }
 }

@@ -11,7 +11,7 @@ type Key = string;
  *  some mock function was called. */
 function statefulStockLevelModel() {
   const store = new Map<Key, { quantity: number; variantId: Types.ObjectId; locationId: Types.ObjectId }>();
-  const variantMeta = new Map<string, { sku: string; productName: string }>();
+  const variantMeta = new Map<string, { sku: string; productName: string; color?: string; size?: string }>();
   const key = (f: { tenantId: Types.ObjectId; variantId: Types.ObjectId; locationId: Types.ObjectId }) =>
     `${f.tenantId.toString()}:${f.variantId.toString()}:${f.locationId.toString()}`;
 
@@ -21,20 +21,25 @@ function statefulStockLevelModel() {
       store.get(key(f))?.quantity ?? 0,
     _seed: (f: { tenantId: Types.ObjectId; variantId: Types.ObjectId; locationId: Types.ObjectId }, quantity: number) =>
       store.set(key(f), { quantity, variantId: f.variantId, locationId: f.locationId }),
-    _seedVariantMeta: (variantId: Types.ObjectId, meta: { sku: string; productName: string }) =>
+    _seedVariantMeta: (variantId: Types.ObjectId, meta: { sku: string; productName: string; color?: string; size?: string }) =>
       variantMeta.set(variantId.toString(), meta),
 
     find: jest.fn((filter: { tenantId: Types.ObjectId; locationId: Types.ObjectId; quantity?: { $gt: number } }) => {
       const rows = [...store.entries()]
         .filter(([, v]) => v.locationId.equals(filter.locationId) && (filter.quantity?.$gt === undefined || v.quantity > filter.quantity.$gt))
-        .map(([, v]) => ({
-          variantId: {
-            _id: v.variantId,
-            sku: variantMeta.get(v.variantId.toString())?.sku ?? '',
-            productId: { name: variantMeta.get(v.variantId.toString())?.productName ?? '' },
-          },
-          quantity: v.quantity,
-        }));
+        .map(([, v]) => {
+          const meta = variantMeta.get(v.variantId.toString());
+          return {
+            variantId: {
+              _id: v.variantId,
+              sku: meta?.sku ?? '',
+              color: meta?.color,
+              size: meta?.size,
+              productId: { name: meta?.productName ?? '' },
+            },
+            quantity: v.quantity,
+          };
+        });
       const chain: any = {
         sort: () => chain,
         skip: () => chain,
@@ -432,8 +437,32 @@ describe('LocationsService.stockByLocation — what a location has allocated', (
 
     expect(result.total).toBe(1);
     expect(result.items).toEqual([
-      { variantId: variantId.toString(), sku: 'CAM-P', productName: 'Camiseta Básica', quantity: 6 },
+      {
+        variantId: variantId.toString(),
+        sku: 'CAM-P',
+        productName: 'Camiseta Básica',
+        color: undefined,
+        size: undefined,
+        displayName: 'Camiseta Básica',
+        quantity: 6,
+      },
     ]);
+  });
+
+  // Regression: the admin "estoque alocado" list used to show only the bare product name,
+  // so every size/color of the same product rendered as an indistinguishable duplicate row
+  // — the SKU was the only thing telling them apart. displayName fixes that.
+  it('concatenates color and size into displayName so same-product variants are distinguishable', async () => {
+    const stockLevelModel = statefulStockLevelModel();
+    const locationModel = richLocationModelStub([{ _id: locationId }]);
+    const service = new LocationsService(locationModel as any, stockLevelModel as any, {} as any);
+    const tid = new Types.ObjectId(tenantId);
+    stockLevelModel._seed({ tenantId: tid, variantId, locationId }, 4);
+    stockLevelModel._seedVariantMeta(variantId, { sku: 'TOPESNC-PRE-P', productName: 'Top Essencial', color: 'Preto', size: 'P' });
+
+    const result = await service.stockByLocation(tenantId, locationId.toString(), 1, 20);
+
+    expect(result.items[0]).toMatchObject({ displayName: 'Top Essencial — Preto — P' });
   });
 
   it('throws NotFoundException for a location that does not belong to this tenant', async () => {

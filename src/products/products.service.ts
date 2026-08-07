@@ -451,6 +451,13 @@ export class ProductsService {
         if (prev && String(prev.productId) === String(productId)) {
           await this.assertSkuFreeForProduct(tenantId, sku, oid);
           await this.variantModel.updateOne({ _id: oid, tenantId: new Types.ObjectId(tenantId) }, { $set: payload }).exec();
+          // Mirror the on-hand change into the tenant's default location so it's visible in
+          // "estoque por local" immediately — otherwise a quantity edited here silently drifts
+          // out of sync with StockLevel until someone allocates it manually.
+          const delta = qty - (prev.quantityOnHand ?? 0);
+          if (delta !== 0) {
+            await this.locations.adjust(tenantId, oid, delta);
+          }
           keptIds.push(oid);
         } else {
           await this.assertSkuFreeForProduct(tenantId, sku);
@@ -469,6 +476,9 @@ export class ProductsService {
                 reason: 'initial',
                 note: 'Initial on-hand at variant upsert',
               });
+              // Same reasoning as the update branch above — the new variant's initial stock
+              // needs a real StockLevel row from the start, not just the cached total.
+              await this.locations.adjust(tenantId, doc._id as Types.ObjectId, qty);
             }
             keptIds.push(doc._id as Types.ObjectId);
           } catch (e: unknown) {
@@ -500,6 +510,7 @@ export class ProductsService {
               reason: 'initial',
               note: 'Initial on-hand at variant upsert',
             });
+            await this.locations.adjust(tenantId, doc._id as Types.ObjectId, qty);
           }
           keptIds.push(doc._id as Types.ObjectId);
         } catch (e: unknown) {
@@ -657,6 +668,7 @@ export class ProductsService {
               reason: 'initial',
               note: 'Initial on-hand at product create (single variant)',
             });
+            await this.locations.adjust(tenantId, vdoc._id as Types.ObjectId, qty);
           }
         } catch (e: unknown) {
           if (
