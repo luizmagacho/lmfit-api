@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -354,6 +355,24 @@ export class UsersService {
     const o = doc.toObject();
     delete (o as { passwordHash?: string }).passwordHash;
     return o;
+  }
+
+  /**
+   * Creates the very first admin user for a brand-new tenant — the one bootstrapping problem
+   * every other user-management route can't solve, since they all require an existing token
+   * already scoped to that tenant. Self-disabling by design: once a tenant has any user at
+   * all, this permanently refuses, so it can never be replayed against a live/populated tenant
+   * to mint an unauthorized admin.
+   */
+  async bootstrapOwner(
+    tenantId: string,
+    data: { email: string; password: string; name: string },
+  ) {
+    const existing = await this.count(tenantId);
+    if (existing > 0) {
+      throw new ConflictException('Este tenant já tem usuários — use o login normal.');
+    }
+    return this.create(tenantId, { ...data, role: 'admin' });
   }
 
   async update(

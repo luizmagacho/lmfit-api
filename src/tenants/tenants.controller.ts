@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -16,6 +17,8 @@ import { RolesGuard } from '../auth/roles.guard';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { CreateTenantRequestDto } from './dto/create-tenant-request.dto';
+import { BootstrapOwnerDto } from './dto/bootstrap-owner.dto';
+import { UsersService } from '../users/users.service';
 import { UpdateBrandingDto } from './dto/update-branding.dto';
 import { UpdateFiscalConfigDto } from './dto/update-fiscal-config.dto';
 import { UpdateLoyaltyConfigDto } from './dto/update-loyalty-config.dto';
@@ -121,7 +124,10 @@ export class TenantsController {
 @ApiTags('tenants')
 @Controller('public/tenants')
 export class PublicTenantsController {
-  constructor(private readonly tenants: TenantsService) {}
+  constructor(
+    private readonly tenants: TenantsService,
+    private readonly users: UsersService,
+  ) {}
 
   @Get()
   listPublicActive() {
@@ -136,5 +142,17 @@ export class PublicTenantsController {
   @Post('request')
   createTenantRequest(@Body() dto: CreateTenantRequestDto) {
     return this.tenants.createTenantRequest(dto);
+  }
+
+  /**
+   * One-shot bootstrap for a brand-new tenant's first admin login — there is no other way
+   * to get a token scoped to a tenant that has zero users yet. `UsersService.bootstrapOwner`
+   * refuses once the tenant has any user, so this can never be replayed against a live tenant.
+   */
+  @Post(':slug/bootstrap-owner')
+  async bootstrapOwner(@Param('slug') slug: string, @Body() dto: BootstrapOwnerDto) {
+    const tenant = await this.tenants.findBySlug(slug);
+    if (!tenant || !tenant.active) throw new NotFoundException('Tenant não encontrado');
+    return this.users.bootstrapOwner(tenant._id.toString(), dto);
   }
 }
