@@ -149,15 +149,19 @@ describe('ProductsService — public catalog filters/sort/pagination (Loop 5)', 
     expect(pipeline[0].$match.category).toBe('Camisas');
   });
 
-  it('combines size+color into a single $elemMatch on the same variant', async () => {
+  it('combines size+color into a single $elemMatch on the same variant, requiring stock on that same variant', async () => {
     mockAggregate([], [{ total: 0 }]);
     await service.listPublicCatalog(tenantId, { size: 'M', color: 'Preto', page: 1, limit: 20 } as any);
     const pipeline = productModel.aggregate.mock.calls[0][0];
     const variantMatchStage = pipeline.find((s: any) => s.$match?.variants?.$elemMatch);
-    expect(variantMatchStage.$match.variants.$elemMatch).toEqual({ size: 'M', color: 'Preto' });
+    expect(variantMatchStage.$match.variants.$elemMatch).toEqual({
+      quantityOnHand: { $gt: 0 },
+      size: 'M',
+      color: 'Preto',
+    });
   });
 
-  it('filters price independently of size/color via a second $elemMatch under $and', async () => {
+  it('filters price independently of size/color via a second $elemMatch under $and, both requiring stock', async () => {
     mockAggregate([], [{ total: 0 }]);
     await service.listPublicCatalog(tenantId, {
       color: 'Preto',
@@ -169,9 +173,32 @@ describe('ProductsService — public catalog filters/sort/pagination (Loop 5)', 
     const pipeline = productModel.aggregate.mock.calls[0][0];
     const andStage = pipeline.find((s: any) => s.$match?.$and);
     expect(andStage.$match.$and).toEqual([
-      { variants: { $elemMatch: { color: 'Preto' } } },
-      { variants: { $elemMatch: { price: { $gte: 100, $lte: 200 } } } },
+      { variants: { $elemMatch: { quantityOnHand: { $gt: 0 }, color: 'Preto' } } },
+      { variants: { $elemMatch: { quantityOnHand: { $gt: 0 }, price: { $gte: 100, $lte: 200 } } } },
     ]);
+  });
+
+  it('requires at least one in-stock variant even with no color/size/price filter at all', async () => {
+    mockAggregate([], [{ total: 0 }]);
+    await service.listPublicCatalog(tenantId, { page: 1, limit: 20 } as any);
+    const pipeline = productModel.aggregate.mock.calls[0][0];
+    const variantMatchStage = pipeline.find((s: any) => s.$match?.variants?.$elemMatch);
+    expect(variantMatchStage.$match.variants.$elemMatch).toEqual({ quantityOnHand: { $gt: 0 } });
+  });
+
+  it('strips out-of-stock variants from the returned product via a $filter stage, before computing minVariantPrice', async () => {
+    mockAggregate([], [{ total: 0 }]);
+    await service.listPublicCatalog(tenantId, { page: 1, limit: 20 } as any);
+    const pipeline = productModel.aggregate.mock.calls[0][0];
+    const filterStageIndex = pipeline.findIndex((s: any) => s.$set?.variants?.$filter);
+    const priceStageIndex = pipeline.findIndex((s: any) => s.$addFields?.minVariantPrice);
+    expect(filterStageIndex).toBeGreaterThanOrEqual(0);
+    expect(priceStageIndex).toBeGreaterThan(filterStageIndex);
+    expect(pipeline[filterStageIndex].$set.variants.$filter).toEqual({
+      input: '$variants',
+      as: 'v',
+      cond: { $gt: ['$$v.quantityOnHand', 0] },
+    });
   });
 
   it.each([

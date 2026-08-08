@@ -1607,26 +1607,41 @@ export class ProductsService {
       },
     ];
 
-    // Cor/tamanho devem casar na mesma variante (é um SKU específico); preço é checado
-    // independentemente (qualquer variante do produto dentro da faixa já qualifica o produto).
-    const variantElemMatch: Record<string, unknown> = {};
+    // Loja/catálogo só devem mostrar peças compráveis agora — a mesma variante que casa
+    // cor/tamanho/preço precisa também ter estoque, senão o produto aparece na listagem só
+    // por causa de uma variação esgotada que nem vai sobrar pra mostrar depois do $filter
+    // abaixo. Cor/tamanho continuam casando na MESMA variante (é um SKU específico); preço
+    // é checado numa variante independente, mas também precisa ter estoque nela.
+    const stockCond = { quantityOnHand: { $gt: 0 } };
+    const variantElemMatch: Record<string, unknown> = { ...stockCond };
     if (size) variantElemMatch.size = size;
     if (color) variantElemMatch.color = color;
-    const variantMatchStages: Record<string, unknown>[] = [];
-    if (Object.keys(variantElemMatch).length > 0) {
-      variantMatchStages.push({ variants: { $elemMatch: variantElemMatch } });
-    }
+    const variantMatchStages: Record<string, unknown>[] = [{ variants: { $elemMatch: variantElemMatch } }];
     if (priceMin !== undefined || priceMax !== undefined) {
       const priceCond: Record<string, number> = {};
       if (priceMin !== undefined) priceCond.$gte = priceMin;
       if (priceMax !== undefined) priceCond.$lte = priceMax;
-      variantMatchStages.push({ variants: { $elemMatch: { price: priceCond } } });
+      variantMatchStages.push({ variants: { $elemMatch: { ...stockCond, price: priceCond } } });
     }
     if (variantMatchStages.length === 1) {
       pipeline.push({ $match: variantMatchStages[0] });
-    } else if (variantMatchStages.length > 1) {
+    } else {
       pipeline.push({ $match: { $and: variantMatchStages } });
     }
+
+    // Descarta as variações sem estoque do produto que passou no filtro acima — a listagem
+    // (cores/tamanhos disponíveis, preço mínimo, etc.) só deve refletir o que dá pra comprar.
+    pipeline.push({
+      $set: {
+        variants: {
+          $filter: {
+            input: '$variants',
+            as: 'v',
+            cond: { $gt: ['$$v.quantityOnHand', 0] },
+          },
+        },
+      },
+    });
 
     pipeline.push({ $addFields: { minVariantPrice: { $min: '$variants.price' } } });
     const sortStage: Record<string, 1 | -1> =
