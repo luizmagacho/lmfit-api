@@ -126,6 +126,114 @@ describe('PurchasesService — new-variant lines feed the normal stock-credit pa
   });
 });
 
+// Regression: leaving "Qtd recebida" blank (its placeholder just says "Opcional") defaulted it
+// to 0 even when the purchase was marked Finalizada — adjustStock credits `quantityReceived`,
+// not `quantityOrdered`, so a merchant who only filled the ordered quantity saw the purchase
+// save fine but stock never moved. A completed purchase should assume "received in full"
+// unless a lower number was explicitly typed (partial receipt).
+describe('PurchasesService — quantityReceived defaults to quantityOrdered once the purchase is completed', () => {
+  let service: PurchasesService;
+  const tenantId = new Types.ObjectId().toString();
+  const supplierId = new Types.ObjectId().toString();
+  const variantId = new Types.ObjectId();
+  const purchaseId = new Types.ObjectId().toString();
+
+  const purchaseModel: any = { create: jest.fn(), findOne: jest.fn(), findOneAndUpdate: jest.fn() };
+  const variantModel: any = { updateOne: jest.fn() };
+  const materialModel: any = {};
+  const locations = { adjust: jest.fn() };
+  const products = {};
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    variantModel.updateOne.mockReturnValue({ exec: jest.fn().mockResolvedValue({}) });
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PurchasesService,
+        { provide: getModelToken(Purchase.name), useValue: purchaseModel },
+        { provide: getModelToken(ProductVariant.name), useValue: variantModel },
+        { provide: getModelToken(Material.name), useValue: materialModel },
+        { provide: ExcelSpreadsheetService, useValue: {} },
+        { provide: LocationsService, useValue: locations },
+        { provide: ProductsService, useValue: products },
+      ],
+    }).compile();
+    service = module.get<PurchasesService>(PurchasesService);
+  });
+
+  it('create(): defaults an omitted quantityReceived to quantityOrdered when status is completed', async () => {
+    purchaseModel.create.mockResolvedValue({ status: 'completed', lines: [] });
+
+    await service.create(tenantId, {
+      supplierId,
+      status: 'completed',
+      lines: [{ variantId: String(variantId), quantityOrdered: 8 } as any],
+    } as any);
+
+    const createCall = purchaseModel.create.mock.calls[0][0];
+    expect(createCall.lines[0].quantityReceived).toBe(8);
+  });
+
+  it('create(): leaves quantityReceived at 0 when the purchase stays pending (outstanding-qty tracking must stay correct)', async () => {
+    purchaseModel.create.mockResolvedValue({ status: 'pending', lines: [] });
+
+    await service.create(tenantId, {
+      supplierId,
+      lines: [{ variantId: String(variantId), quantityOrdered: 8 } as any],
+    } as any);
+
+    const createCall = purchaseModel.create.mock.calls[0][0];
+    expect(createCall.lines[0].quantityReceived).toBe(0);
+  });
+
+  it('create(): respects an explicit partial quantityReceived even when completed', async () => {
+    purchaseModel.create.mockResolvedValue({ status: 'completed', lines: [] });
+
+    await service.create(tenantId, {
+      supplierId,
+      status: 'completed',
+      lines: [{ variantId: String(variantId), quantityOrdered: 8, quantityReceived: 3 } as any],
+    } as any);
+
+    const createCall = purchaseModel.create.mock.calls[0][0];
+    expect(createCall.lines[0].quantityReceived).toBe(3);
+  });
+
+  it('update(): defaults quantityReceived to quantityOrdered when this same call flips status to completed', async () => {
+    purchaseModel.findOne.mockReturnValue({
+      lean: () => ({ exec: jest.fn().mockResolvedValue({ status: 'pending', lines: [] }) }),
+    });
+    purchaseModel.findOneAndUpdate.mockReturnValue({
+      lean: () => ({ exec: jest.fn().mockResolvedValue({ status: 'completed', lines: [] }) }),
+    });
+
+    await service.update(tenantId, purchaseId, {
+      status: 'completed',
+      lines: [{ variantId: String(variantId), quantityOrdered: 8 } as any],
+    } as any);
+
+    const updateCall = purchaseModel.findOneAndUpdate.mock.calls[0][1];
+    expect(updateCall.lines[0].quantityReceived).toBe(8);
+  });
+
+  it('update(): defaults quantityReceived to quantityOrdered when the purchase was ALREADY completed and only lines are being resaved', async () => {
+    purchaseModel.findOne.mockReturnValue({
+      lean: () => ({ exec: jest.fn().mockResolvedValue({ status: 'completed', lines: [] }) }),
+    });
+    purchaseModel.findOneAndUpdate.mockReturnValue({
+      lean: () => ({ exec: jest.fn().mockResolvedValue({ status: 'completed', lines: [] }) }),
+    });
+
+    await service.update(tenantId, purchaseId, {
+      lines: [{ variantId: String(variantId), quantityOrdered: 8 } as any],
+    } as any);
+
+    const updateCall = purchaseModel.findOneAndUpdate.mock.calls[0][1];
+    expect(updateCall.lines[0].quantityReceived).toBe(8);
+  });
+});
+
 describe('PurchasesService.listFilter (via findAll) — search input is regex-escaped', () => {
   let service: PurchasesService;
   const tenantId = new Types.ObjectId().toString();

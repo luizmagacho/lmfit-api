@@ -5,6 +5,7 @@ import { ProductionController } from './production.controller';
 import { ProductionService } from './production.service';
 
 import { ProductVariant, ProductVariantSchema } from '../products/schemas/product-variant.schema';
+import { LocationsModule } from '../locations/locations.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { ProductVariant, ProductVariantSchema } from '../products/schemas/produc
       { name: ProductionBatch.name, schema: ProductionBatchSchema },
       { name: ProductVariant.name, schema: ProductVariantSchema },
     ]),
+    LocationsModule,
   ],
   controllers: [ProductionController],
   providers: [ProductionService],

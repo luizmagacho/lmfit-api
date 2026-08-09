@@ -78,11 +78,12 @@ export class PurchasesService {
 
   async create(tenantId: string, dto: CreatePurchaseDto, createdBy?: string) {
     const resolvedLines = await this.resolveNewVariants(tenantId, dto.lines ?? []);
-    const lines = this.normalizePurchaseLines(resolvedLines);
+    const status = dto.status ?? 'pending';
+    const lines = this.normalizePurchaseLines(resolvedLines, status);
     const doc = await this.model.create({
       tenantId: new Types.ObjectId(tenantId),
       supplierId: new Types.ObjectId(dto.supplierId),
-      status: dto.status ?? 'pending',
+      status,
       reference: dto.reference,
       total: dto.total ?? 0,
       notes: dto.notes,
@@ -95,8 +96,18 @@ export class PurchasesService {
     return doc;
   }
 
+  /**
+   * `quantityReceived` só é opcional na tela pra permitir recebimento parcial — mas o padrão
+   * ("Opcional", sem explicação) faz a maioria simplesmente não preencher, esperando que
+   * marcar a compra como Finalizada já signifique "chegou tudo que foi pedido". Sem este
+   * fallback, `quantityReceived` ficava 0 por padrão e `adjustStock` nunca creditava estoque
+   * nenhum mesmo com a compra concluída — era esse o "quantidade que eu informo não aparece".
+   * Só se aplica quando a linha vai ficar com status 'completed' — pra pending/started,
+   * 0 continua o certo (é o que alimenta `sumPendingOutstandingByVariantIds`).
+   */
   private normalizePurchaseLines(
-    lines?: PurchaseLineInputDto[],
+    lines: PurchaseLineInputDto[] | undefined,
+    status: string,
   ): Purchase['lines'] {
     if (!lines?.length) return [];
     return lines.map((l) => ({
@@ -105,7 +116,8 @@ export class PurchasesService {
       rawName: l.rawName,
       unitPrice: l.unitPrice ?? 0,
       quantityOrdered: l.quantityOrdered,
-      quantityReceived: l.quantityReceived ?? 0,
+      quantityReceived:
+        status === 'completed' ? l.quantityReceived || l.quantityOrdered : (l.quantityReceived ?? 0),
     }));
   }
 
@@ -424,6 +436,9 @@ export class PurchasesService {
   async update(tenantId: string, id: string, dto: UpdatePurchaseDto) {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
     const scoped = { _id: id, tenantId: new Types.ObjectId(tenantId) };
+    const oldDoc = await this.model.findOne(scoped).lean().exec();
+    if (!oldDoc) throw new NotFoundException();
+
     const payload: Record<string, unknown> = {};
     if (dto.status !== undefined) payload.status = dto.status;
     if (dto.reference !== undefined) payload.reference = dto.reference;
@@ -431,10 +446,12 @@ export class PurchasesService {
     if (dto.notes !== undefined) payload.notes = dto.notes;
     if (dto.lines !== undefined) {
       const resolvedLines = await this.resolveNewVariants(tenantId, dto.lines);
-      payload.lines = this.normalizePurchaseLines(resolvedLines);
+      // Status pode estar mudando nesta mesma chamada (dto.status) ou continuar o que já
+      // estava salvo — normaliza quantityReceived usando o status que a linha vai TER depois
+      // deste update, não o que tinha antes.
+      const effectiveStatus = dto.status ?? oldDoc.status;
+      payload.lines = this.normalizePurchaseLines(resolvedLines, effectiveStatus);
     }
-    const oldDoc = await this.model.findOne(scoped).lean().exec();
-    if (!oldDoc) throw new NotFoundException();
     if (oldDoc.status === 'completed') {
       await this.adjustStock(oldDoc as any, -1);
     }

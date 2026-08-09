@@ -7,6 +7,7 @@ import type { UpdateProductionBatchDto } from './dto/update-production-batch.dto
 import { skipFromPage } from '../common/dto/pagination-query.dto';
 import { ProductVariant } from '../products/schemas/product-variant.schema';
 import { escapeRegex } from '../common/utils/text-search.util';
+import { LocationsService } from '../locations/locations.service';
 
 @Injectable()
 export class ProductionService {
@@ -15,6 +16,7 @@ export class ProductionService {
     private readonly model: Model<ProductionBatch>,
     @InjectModel(ProductVariant.name)
     private readonly variantModel: Model<ProductVariant>,
+    private readonly locations: LocationsService,
   ) {}
 
   /**
@@ -34,14 +36,34 @@ export class ProductionService {
    *   suggestedPrice  = costPerUnit / (1 - targetMarginPercent/100)
    */
   
-  private async adjustStock(doc: ProductionBatch, multiplier: number) {
+  /**
+   * O SKU aqui é texto livre (autocomplete sobre lotes passados, não referencia um variantId
+   * de verdade) — um espaço a mais ou letra em caixa diferente da variante real fazia essa
+   * baixa/alta de estoque não encontrar nada e falhar em silêncio, mesmo com o lote salvo
+   * normalmente. Casa por SKU sem diferenciar espaços/caixa, sempre dentro do tenant (SKU não é
+   * globalmente único — sem o filtro, um lote deste tenant podia creditar a variante de outro).
+   * Também credita o local padrão via LocationsService — sem isso o total (quantityOnHand)
+   * subia mas o estoque por local nunca refletia a produção, como já era feito em Compras.
+   */
+  private async adjustStock(tenantId: string, doc: ProductionBatch, multiplier: number) {
     if (!doc.sku || !doc.batchQty) return;
+    const trimmedSku = doc.sku.trim();
+    if (!trimmedSku) return;
     const qty = doc.batchQty * multiplier;
     if (qty === 0) return;
-    await this.variantModel.updateOne(
-      { sku: doc.sku },
-      { $inc: { quantityOnHand: qty } }
-    ).exec();
+    const variant = await this.variantModel
+      .findOneAndUpdate(
+        {
+          tenantId: new Types.ObjectId(tenantId),
+          sku: new RegExp(`^${escapeRegex(trimmedSku)}$`, 'i'),
+        },
+        { $inc: { quantityOnHand: qty } },
+        { new: true },
+      )
+      .lean()
+      .exec();
+    if (!variant) return;
+    await this.locations.adjust(tenantId, variant._id as Types.ObjectId, qty);
   }
 
   private computeCosts(dto: Partial<CreateProductionBatchDto>): {
@@ -122,7 +144,7 @@ export class ProductionService {
       ...computed,
     });
     if (doc.status === 'Concluído' || doc.status === 'Pronto') {
-      await this.adjustStock(doc as any, 1);
+      await this.adjustStock(tenantId, doc as any, 1);
     }
     return doc;
   }
@@ -205,7 +227,7 @@ export class ProductionService {
     if (dto.dueDate !== undefined) payload.dueDate = new Date(dto.dueDate);
 
     if (existing.status === 'Concluído' || existing.status === 'Pronto') {
-      await this.adjustStock(existing as any, -1);
+      await this.adjustStock(tenantId, existing as any, -1);
     }
 
     const doc = await this.model
@@ -215,7 +237,7 @@ export class ProductionService {
     if (!doc) throw new NotFoundException();
 
     if (doc.status === 'Concluído' || doc.status === 'Pronto') {
-      await this.adjustStock(doc as any, 1);
+      await this.adjustStock(tenantId, doc as any, 1);
     }
     return doc;
   }
@@ -225,7 +247,7 @@ export class ProductionService {
     if (!existing) throw new NotFoundException('Lote de produção não encontrado');
 
     if (existing.status === 'Concluído' || existing.status === 'Pronto') {
-      await this.adjustStock(existing as any, -1);
+      await this.adjustStock(tenantId, existing as any, -1);
     }
     const res = await this.model.deleteOne({ _id: id, tenantId: this.tidFilter(tenantId) }).exec();
     if (!res.deletedCount) throw new NotFoundException();
