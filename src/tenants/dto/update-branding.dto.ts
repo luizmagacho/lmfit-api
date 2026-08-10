@@ -27,6 +27,11 @@ export class UpdateBrandingDto {
   @IsBoolean()
   darkMode?: boolean;
 
+  @ApiPropertyOptional({ description: 'Número de WhatsApp para onde os checkouts públicos mandam o cliente ao finalizar um pedido.' })
+  @IsOptional()
+  @IsString()
+  whatsappNumber?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

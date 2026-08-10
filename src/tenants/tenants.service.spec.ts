@@ -173,6 +173,17 @@ describe('TenantsService — config writes invalidate the public slug cache (Loo
     const call = tenantModel.findByIdAndUpdate.mock.calls.at(-1);
     expect(call[1].$set).toEqual({ whatsappAiEnabled: true });
   });
+
+  // Regression: the public /loja and /catalogo checkouts build their wa.me handoff from
+  // tenant.whatsappNumber, but nothing in the codebase ever let a merchant set it through
+  // Settings — this is the write side of that fix, sitting on the existing branding endpoint
+  // rather than a new route since UpdateBrandingDto already carries unrelated settings too.
+  it('updateBranding sets whatsappNumber flat, in plaintext (not a secret, no encryption)', async () => {
+    await service.updateBranding(tenantId, { whatsappNumber: '5541996770521' } as any);
+
+    const call = tenantModel.findByIdAndUpdate.mock.calls.at(-1);
+    expect(call[1].$set).toEqual({ whatsappNumber: '5541996770521' });
+  });
 });
 
 describe('TenantsService.getPublicBranding — analytics redaction (Loop 15)', () => {

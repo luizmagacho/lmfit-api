@@ -163,6 +163,7 @@ export class TenantsService {
     if (dto.primaryColor !== undefined) setFields['branding.primaryColor'] = dto.primaryColor;
     if (dto.secondaryColor !== undefined) setFields['branding.secondaryColor'] = dto.secondaryColor;
     if (dto.darkMode !== undefined) setFields['branding.darkMode'] = dto.darkMode;
+    if (dto.whatsappNumber !== undefined) setFields['whatsappNumber'] = dto.whatsappNumber;
     if (dto.infinitePayTag !== undefined) setFields['infinitePayTag'] = dto.infinitePayTag;
     if (dto.infinitePayApiKey !== undefined) setFields['infinitePayApiKey'] = dto.infinitePayApiKey;
     if (dto.geminiApiKey !== undefined) setFields['geminiApiKey'] = dto.geminiApiKey;
