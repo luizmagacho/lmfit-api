@@ -149,19 +149,18 @@ describe('ProductsService — public catalog filters/sort/pagination (Loop 5)', 
     expect(pipeline[0].$match.category).toBe('Camisas');
   });
 
-  it('combines size+color into a single $elemMatch on the same variant, requiring stock on that same variant', async () => {
+  it('combines size+color into a single $elemMatch on the same variant, not requiring stock (out-of-stock but active pieces still list)', async () => {
     mockAggregate([], [{ total: 0 }]);
     await service.listPublicCatalog(tenantId, { size: 'M', color: 'Preto', page: 1, limit: 20 } as any);
     const pipeline = productModel.aggregate.mock.calls[0][0];
-    const variantMatchStage = pipeline.find((s: any) => s.$match?.variants?.$elemMatch);
-    expect(variantMatchStage.$match.variants.$elemMatch).toEqual({
-      quantityOnHand: { $gt: 0 },
-      size: 'M',
-      color: 'Preto',
-    });
+    const andStage = pipeline.find((s: any) => s.$match?.$and);
+    expect(andStage.$match.$and).toEqual([
+      { 'variants.0': { $exists: true } },
+      { variants: { $elemMatch: { size: 'M', color: 'Preto' } } },
+    ]);
   });
 
-  it('filters price independently of size/color via a second $elemMatch under $and, both requiring stock', async () => {
+  it('filters price independently of size/color via a second $elemMatch under $and, neither requiring stock', async () => {
     mockAggregate([], [{ total: 0 }]);
     await service.listPublicCatalog(tenantId, {
       color: 'Preto',
@@ -173,41 +172,57 @@ describe('ProductsService — public catalog filters/sort/pagination (Loop 5)', 
     const pipeline = productModel.aggregate.mock.calls[0][0];
     const andStage = pipeline.find((s: any) => s.$match?.$and);
     expect(andStage.$match.$and).toEqual([
-      { variants: { $elemMatch: { quantityOnHand: { $gt: 0 }, color: 'Preto' } } },
-      { variants: { $elemMatch: { quantityOnHand: { $gt: 0 }, price: { $gte: 100, $lte: 200 } } } },
+      { 'variants.0': { $exists: true } },
+      { variants: { $elemMatch: { color: 'Preto' } } },
+      { variants: { $elemMatch: { price: { $gte: 100, $lte: 200 } } } },
     ]);
   });
 
-  it('requires at least one in-stock variant even with no color/size/price filter at all', async () => {
+  it('requires at least one variant (regardless of stock) even with no color/size/price filter at all', async () => {
     mockAggregate([], [{ total: 0 }]);
     await service.listPublicCatalog(tenantId, { page: 1, limit: 20 } as any);
     const pipeline = productModel.aggregate.mock.calls[0][0];
-    const variantMatchStage = pipeline.find((s: any) => s.$match?.variants?.$elemMatch);
-    expect(variantMatchStage.$match.variants.$elemMatch).toEqual({ quantityOnHand: { $gt: 0 } });
+    const variantMatchStage = pipeline.find((s: any) => s.$match?.['variants.0']);
+    expect(variantMatchStage.$match).toEqual({ 'variants.0': { $exists: true } });
   });
 
-  it('strips out-of-stock variants from the returned product via a $filter stage, before computing minVariantPrice', async () => {
+  it('never strips out-of-stock variants — they stay in the payload so the front can grey them out', async () => {
     mockAggregate([], [{ total: 0 }]);
     await service.listPublicCatalog(tenantId, { page: 1, limit: 20 } as any);
     const pipeline = productModel.aggregate.mock.calls[0][0];
-    const filterStageIndex = pipeline.findIndex((s: any) => s.$set?.variants?.$filter);
-    const priceStageIndex = pipeline.findIndex((s: any) => s.$addFields?.minVariantPrice);
-    expect(filterStageIndex).toBeGreaterThanOrEqual(0);
-    expect(priceStageIndex).toBeGreaterThan(filterStageIndex);
-    expect(pipeline[filterStageIndex].$set.variants.$filter).toEqual({
-      input: '$variants',
-      as: 'v',
-      cond: { $gt: ['$$v.quantityOnHand', 0] },
+    const setFilterStage = pipeline.find((s: any) => s.$set?.variants?.$filter);
+    expect(setFilterStage).toBeUndefined();
+  });
+
+  it('computes an inStock field (any variant with quantityOnHand > 0) alongside minVariantPrice', async () => {
+    mockAggregate([], [{ total: 0 }]);
+    await service.listPublicCatalog(tenantId, { page: 1, limit: 20 } as any);
+    const pipeline = productModel.aggregate.mock.calls[0][0];
+    const addFieldsStage = pipeline.find((s: any) => s.$addFields?.minVariantPrice);
+    expect(addFieldsStage.$addFields.minVariantPrice).toEqual({ $min: '$variants.price' });
+    expect(addFieldsStage.$addFields.inStock).toEqual({
+      $gt: [
+        {
+          $size: {
+            $filter: {
+              input: '$variants',
+              as: 'v',
+              cond: { $gt: ['$$v.quantityOnHand', 0] },
+            },
+          },
+        },
+        0,
+      ],
     });
   });
 
   it.each([
-    ['menor-preco', { minVariantPrice: 1 }],
-    ['maior-preco', { minVariantPrice: -1 }],
-    ['lancamentos', { createdAt: -1 }],
-    ['relevancia', { name: 1 }],
-    [undefined, { name: 1 }],
-  ])('sort=%s produces the matching $sort stage', async (sort, expected) => {
+    ['menor-preco', { inStock: -1, minVariantPrice: 1 }],
+    ['maior-preco', { inStock: -1, minVariantPrice: -1 }],
+    ['lancamentos', { inStock: -1, createdAt: -1 }],
+    ['relevancia', { inStock: -1, name: 1 }],
+    [undefined, { inStock: -1, name: 1 }],
+  ])('sort=%s produces the matching $sort stage with in-stock items always first', async (sort, expected) => {
     mockAggregate([], [{ total: 0 }]);
     await service.listPublicCatalog(tenantId, { sort, page: 1, limit: 20 } as any);
     const pipeline = productModel.aggregate.mock.calls[0][0];

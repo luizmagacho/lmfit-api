@@ -1607,21 +1607,23 @@ export class ProductsService {
       },
     ];
 
-    // Loja/catálogo só devem mostrar peças compráveis agora — a mesma variante que casa
-    // cor/tamanho/preço precisa também ter estoque, senão o produto aparece na listagem só
-    // por causa de uma variação esgotada que nem vai sobrar pra mostrar depois do $filter
-    // abaixo. Cor/tamanho continuam casando na MESMA variante (é um SKU específico); preço
-    // é checado numa variante independente, mas também precisa ter estoque nela.
-    const stockCond = { quantityOnHand: { $gt: 0 } };
-    const variantElemMatch: Record<string, unknown> = { ...stockCond };
+    // Loja/catálogo mostram peças ativas independente de estoque — só nunca uma inativa. Cor/
+    // tamanho continuam casando na MESMA variante (é um SKU específico); preço é checado numa
+    // variante independente. Nenhuma dessas condições exige mais estoque: um item esgotado mas
+    // ativo deve continuar aparecendo (acinzentado no front), só ordenado depois dos com estoque.
+    const variantElemMatch: Record<string, unknown> = {};
     if (size) variantElemMatch.size = size;
     if (color) variantElemMatch.color = color;
-    const variantMatchStages: Record<string, unknown>[] = [{ variants: { $elemMatch: variantElemMatch } }];
+    // Todo produto listado precisa ter ao menos uma variante (senão não há o que comprar/mostrar).
+    const variantMatchStages: Record<string, unknown>[] = [{ 'variants.0': { $exists: true } }];
+    if (Object.keys(variantElemMatch).length) {
+      variantMatchStages.push({ variants: { $elemMatch: variantElemMatch } });
+    }
     if (priceMin !== undefined || priceMax !== undefined) {
       const priceCond: Record<string, number> = {};
       if (priceMin !== undefined) priceCond.$gte = priceMin;
       if (priceMax !== undefined) priceCond.$lte = priceMax;
-      variantMatchStages.push({ variants: { $elemMatch: { ...stockCond, price: priceCond } } });
+      variantMatchStages.push({ variants: { $elemMatch: { price: priceCond } } });
     }
     if (variantMatchStages.length === 1) {
       pipeline.push({ $match: variantMatchStages[0] });
@@ -1629,22 +1631,29 @@ export class ProductsService {
       pipeline.push({ $match: { $and: variantMatchStages } });
     }
 
-    // Descarta as variações sem estoque do produto que passou no filtro acima — a listagem
-    // (cores/tamanhos disponíveis, preço mínimo, etc.) só deve refletir o que dá pra comprar.
+    // `inStock` = tem alguma variante com estoque > 0 — usado pra ordenar (com estoque primeiro)
+    // e pro front decidir o acinzentado/badge "Esgotado", sem descartar as variações esgotadas
+    // do payload (o cliente ainda precisa poder ver que a peça existe, só não pode comprar agora).
     pipeline.push({
-      $set: {
-        variants: {
-          $filter: {
-            input: '$variants',
-            as: 'v',
-            cond: { $gt: ['$$v.quantityOnHand', 0] },
-          },
+      $addFields: {
+        minVariantPrice: { $min: '$variants.price' },
+        inStock: {
+          $gt: [
+            {
+              $size: {
+                $filter: {
+                  input: '$variants',
+                  as: 'v',
+                  cond: { $gt: ['$$v.quantityOnHand', 0] },
+                },
+              },
+            },
+            0,
+          ],
         },
       },
     });
-
-    pipeline.push({ $addFields: { minVariantPrice: { $min: '$variants.price' } } });
-    const sortStage: Record<string, 1 | -1> =
+    const secondarySort: Record<string, 1 | -1> =
       sort === 'menor-preco'
         ? { minVariantPrice: 1 }
         : sort === 'maior-preco'
@@ -1652,7 +1661,9 @@ export class ProductsService {
           : sort === 'lancamentos'
             ? { createdAt: -1 }
             : { name: 1 };
-    pipeline.push({ $sort: sortStage });
+    // Com estoque sempre primeiro, depois o critério de ordenação escolhido — vale entre páginas
+    // (é ordenação no servidor, antes do $skip/$limit), não só dentro da página já carregada.
+    pipeline.push({ $sort: { inStock: -1, ...secondarySort } });
 
     const countPipeline = [...pipeline, { $count: 'total' }];
     const skip = skipFromPage(page, limit);
