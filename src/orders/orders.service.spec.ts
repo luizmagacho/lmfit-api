@@ -108,6 +108,24 @@ describe('OrdersService.create — wholesale re-validation on staff/PDV orders',
     // so the minimum-quantity rule does not apply.
     await expect(service.create(tenantId, baseDto(40, 1) as any)).resolves.toBeDefined();
   });
+
+  // Regression: getWholesalePricingBatch() falls back priceWholesale to priceRetail when the
+  // merchant never configured a real atacado price — the most common setup for this tenant's
+  // catalog. Before this fix, a single-unit public checkout (unitPrice === priceRetail ===
+  // priceWholesale) always satisfied `unitPrice <= priceWholesale` and got rejected with the
+  // "exige quantidade mínima" error, silently breaking WhatsApp checkout for most products.
+  it('allows a single-unit retail sale when priceWholesale has no real discount (falls back to priceRetail)', async () => {
+    products.getWholesalePricingBatch.mockResolvedValue(
+      new Map([[variantId, { priceRetail: 70, priceWholesale: 70, minWholesaleQty: 6 }]]),
+    );
+    orderModel.create.mockResolvedValue({
+      _id: new Types.ObjectId(),
+      customerId,
+      toObject: () => ({ _id: 'order-1' }),
+    });
+
+    await expect(service.create(tenantId, baseDto(70, 1) as any)).resolves.toBeDefined();
+  });
 });
 
 describe('OrdersService.findAll — search input is regex-escaped', () => {

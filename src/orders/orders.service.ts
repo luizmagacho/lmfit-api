@@ -130,8 +130,19 @@ export class OrdersService {
       // quantity must still be honored — otherwise atacado pricing could be granted to a
       // varejo-sized purchase just by typing the lower number. Mirrors the server-side
       // enforcement already done for the public checkout in order-drafts.service.ts.
+      // Only applies when the variant actually HAS a wholesale discount configured
+      // (priceWholesale < priceRetail) — getWholesalePricingBatch() falls back priceWholesale
+      // to priceRetail when the merchant never set one, and without this guard every single-unit
+      // retail sale of such a variant (the common case — most SKUs here have no atacado price
+      // set) was rejected with this same "exige quantidade mínima" error, since unitPrice ==
+      // priceRetail == priceWholesale always satisfied `unitPrice <= priceWholesale`.
       const pricing = pricingByVariant.get(line.variantId);
-      if (pricing && unitPrice <= pricing.priceWholesale && line.quantity < pricing.minWholesaleQty) {
+      if (
+        pricing &&
+        pricing.priceWholesale < pricing.priceRetail &&
+        unitPrice <= pricing.priceWholesale &&
+        line.quantity < pricing.minWholesaleQty
+      ) {
         throw new BadRequestException(
           `Preço de atacado para ${v.sku} exige quantidade mínima de ${pricing.minWholesaleQty} (solicitado ${line.quantity}).`,
         );
