@@ -38,9 +38,35 @@ export class LoyaltyConfig {
   @Prop({ default: 0.01 }) redeemValuePerPoint: number;
 }
 
+/** Endereço de origem da loja (Loop 27) — necessário como ponto de partida de qualquer cotação real
+ *  de frete (toda API de transportadora exige origem + destino). Mesmo shape de
+ *  `customers/schemas/address.schema.ts`, sem `label`/`_id` (é um único endereço, não uma lista). */
+export class ShippingOriginAddress {
+  @Prop({ trim: true }) cep?: string;
+  @Prop({ trim: true }) logradouro?: string;
+  @Prop({ trim: true }) numero?: string;
+  @Prop({ trim: true }) complemento?: string;
+  @Prop({ trim: true }) bairro?: string;
+  @Prop({ trim: true }) cidade?: string;
+  @Prop({ trim: true }) uf?: string;
+}
+
+export type ShippingCarrierAmbiente = 'sandbox' | 'producao';
+
+/** Credenciais da Melhor Envio (Loop 27) — token com escopo só de "Cotação de fretes" (não precisa
+ *  do fluxo OAuth completo, ver adapter). `token` é guardado criptografado (mesmo padrão de
+ *  `AnalyticsConfig.metaConversionsApiToken`, `EncryptionService`, Loop 18) — nunca em texto puro. */
+export class MelhorEnvioConfig {
+  @Prop({ trim: true }) token?: string;
+  @Prop({ type: String, enum: ['sandbox', 'producao'], default: 'sandbox' })
+  ambiente: ShippingCarrierAmbiente;
+}
+
 /** Frete v1 por método (Loop 3): taxa fixa por método + isenção acima de um valor de subtotal.
  *  `pickup` nunca cobra, independente de config. Cálculo real acontece sempre no servidor —
- *  o valor nunca é aceito vindo do cliente (ver order-drafts.service.ts `computeShippingCost`). */
+ *  o valor nunca é aceito vindo do cliente (ver order-drafts.service.ts `computeShippingCost`).
+ *  Loop 27 acrescenta `originAddress`/`melhorEnvio`: sem token configurado, `ShippingQuoteService`
+ *  cai automaticamente nas 3 taxas fixas abaixo — nenhum campo aqui muda de comportamento sozinho. */
 export class ShippingConfig {
   @Prop({ trim: true, default: 'Retirada em Loja' }) pickupLabel: string;
   @Prop({ default: 19.9, min: 0 }) standardFee: number;
@@ -48,6 +74,8 @@ export class ShippingConfig {
   /** Subtotal (produtos, antes do desconto Pix) a partir do qual standard/express ficam grátis.
    *  `undefined`/0 = sem isenção. */
   @Prop({ min: 0 }) freeAboveTotal?: number;
+  @Prop({ type: ShippingOriginAddress }) originAddress?: ShippingOriginAddress;
+  @Prop({ type: MelhorEnvioConfig }) melhorEnvio?: MelhorEnvioConfig;
 }
 
 /** Camada de marca da loja pública v1 (Loop 4): estilo visual + avisos + liga/desliga.

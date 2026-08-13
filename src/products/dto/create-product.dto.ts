@@ -131,6 +131,24 @@ export class CreateProductDto {
   @Min(0)
   weightGrams?: number;
 
+  @ApiPropertyOptional({ description: 'Largura da embalagem em cm, para cotação real de frete (Loop 27)', nullable: true })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  widthCm?: number;
+
+  @ApiPropertyOptional({ description: 'Altura da embalagem em cm, para cotação real de frete (Loop 27)', nullable: true })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  heightCm?: number;
+
+  @ApiPropertyOptional({ description: 'Comprimento da embalagem em cm, para cotação real de frete (Loop 27)', nullable: true })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  lengthCm?: number;
+
   @ApiPropertyOptional({
     type: [ProductVariantUpsertDto],
     description:

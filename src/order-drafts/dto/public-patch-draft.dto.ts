@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -67,10 +68,26 @@ export class PublicPatchDraftDto {
   @MaxLength(100)
   paymentMethodChoice?: string;
 
-  @ApiPropertyOptional({ enum: ['pickup', 'standard', 'express'] })
+  // Loop 27: deixou de ser um enum fechado de 3 valores — passa a aceitar também o id de uma
+  // cotação real da Melhor Envio ("me:<serviceId>"), retornado por POST /public/shipping/quote.
+  // A validação "esse id é real e bate com uma cotação de verdade" acontece no
+  // OrderDraftsService (nunca aceita um preço vindo do cliente), não na DTO.
+  @ApiPropertyOptional({
+    description:
+      'Método fixo ("pickup"/"standard"/"express") ou id de uma cotação real da Melhor Envio ("me:<id>", vindo de POST /public/shipping/quote).',
+  })
   @IsOptional()
-  @IsEnum(['pickup', 'standard', 'express'])
-  shippingMethod?: 'pickup' | 'standard' | 'express';
+  @IsString()
+  @MaxLength(50)
+  shippingMethod?: string;
+
+  @ApiPropertyOptional({
+    description: 'CEP de destino — obrigatório só quando shippingMethod é uma cotação real ("me:*").',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{5}-?\d{3}$/, { message: 'CEP inválido' })
+  destinationCep?: string;
 
   // Sem campo de shippingCost aqui de propósito: o valor nunca vem do cliente (Loop 3) — é sempre
   // recalculado no servidor a partir de shippingMethod + shippingConfig do tenant + subtotal

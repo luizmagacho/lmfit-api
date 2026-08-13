@@ -72,6 +72,13 @@ export class Order {
   @Prop({ type: Number, default: 0 })
   shippingCost: number;
 
+  /** Rótulo legível da cotação real escolhida via Melhor Envio (Loop 27), ex. "PAC (Correios) — 9
+   *  dias úteis" — informativo pra quem despacha; `shippingMethod` continua guardando o id técnico
+   *  (`"me:1"`) usado internamente, sem relação com isto. `undefined` pros métodos fixos de sempre
+   *  (pickup/standard/express). */
+  @Prop({ trim: true })
+  shippingServiceLabel?: string;
+
   @Prop({ trim: true, uppercase: true })
   couponCode?: string;
 

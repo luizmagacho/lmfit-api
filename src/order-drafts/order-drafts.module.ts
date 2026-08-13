@@ -12,6 +12,7 @@ import { CustomersModule } from '../customers/customers.module';
 import { ProductsModule } from '../products/products.module';
 import { PromotionsModule } from '../promotions/promotions.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { ShippingModule } from '../shipping/shipping.module';
 import { OrderDraft, OrderDraftSchema } from './schemas/order-draft.schema';
 import { OrderDraftsService } from './order-drafts.service';
 import { PublicOrderDraftsController } from './public-order-drafts.controller';
@@ -28,6 +29,7 @@ import { CheckoutAlertService } from './checkout-alert.service';
     ProductsModule,
     PromotionsModule,
     NotificationsModule,
+    ShippingModule,
     MongooseModule.forFeature([
       { name: OrderDraft.name, schema: OrderDraftSchema },
       { name: ProductVariant.name, schema: ProductVariantSchema },

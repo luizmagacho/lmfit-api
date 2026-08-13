@@ -58,6 +58,23 @@ export class OrderDraft {
   @Prop({ type: Number, default: 0 })
   shippingCost: number;
 
+  /** CEP de destino (Loop 27) — só é obrigatório quando `shippingMethod` é uma cotação real da
+   *  Melhor Envio (`"me:<id>"`); os 3 métodos fixos de sempre (pickup/standard/express) continuam
+   *  não precisando de endereço nenhum. */
+  @Prop({ trim: true })
+  destinationCep?: string;
+
+  /** Detalhe da cotação real escolhida (Loop 27) — só preenchido quando `shippingMethod` é `"me:*"`.
+   *  Existe pra o valor mostrado no checkout nunca divergir do que vai pro pedido: `submitByToken`
+   *  copia isto pro `Order`, nunca recalcula. */
+  @Prop({ type: MSchema.Types.Mixed })
+  shippingQuote?: {
+    method: string;
+    label: string;
+    price: number;
+    deliveryDays?: number;
+  };
+
   @Prop({ trim: true, uppercase: true })
   couponCode?: string;
 

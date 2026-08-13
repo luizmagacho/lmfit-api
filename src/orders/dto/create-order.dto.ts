@@ -85,6 +85,11 @@ export class CreateOrderDto {
   @Min(0)
   shippingCost?: number;
 
+  @ApiPropertyOptional({ description: 'Rótulo legível da cotação real da Melhor Envio (Loop 27), ex. "PAC (Correios)"' })
+  @IsOptional()
+  @IsString()
+  shippingServiceLabel?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

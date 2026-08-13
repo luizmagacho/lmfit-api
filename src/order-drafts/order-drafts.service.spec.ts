@@ -44,6 +44,7 @@ describe('OrderDraftsService — public draft stock & pricing rules', () => {
   const config: any = { get: jest.fn().mockReturnValue('') };
   const excel: any = {};
   const tenants: any = { findById: jest.fn().mockResolvedValue({ pricingDisplay: { pixDiscountPercent: 0 } }) };
+  const shippingQuotes: any = { quote: jest.fn() };
 
   const service = new OrderDraftsService(
     draftModel,
@@ -57,6 +58,7 @@ describe('OrderDraftsService — public draft stock & pricing rules', () => {
     config,
     excel,
     tenants,
+    shippingQuotes,
   );
 
   function setupVariant(v: Record<string, unknown>) {
@@ -150,6 +152,7 @@ describe('OrderDraftsService — shipping (Loop 3)', () => {
   const config: any = { get: jest.fn().mockReturnValue('') };
   const excel: any = {};
   const tenants: any = { findById: jest.fn() };
+  const shippingQuotes: any = { quote: jest.fn() };
 
   const service = new OrderDraftsService(
     draftModel,
@@ -163,6 +166,7 @@ describe('OrderDraftsService — shipping (Loop 3)', () => {
     config,
     excel,
     tenants,
+    shippingQuotes,
   );
 
   // Rascunho já com linhas (subtotal 200 = 2 × 100) — só o método de frete muda a cada teste.
@@ -232,17 +236,131 @@ describe('OrderDraftsService — shipping (Loop 3)', () => {
   });
 });
 
-describe('PublicPatchDraftDto — shippingMethod is a closed enum (AC7)', () => {
-  it('rejects a shippingMethod outside pickup/standard/express', async () => {
-    const dto = plainToInstance(PublicPatchDraftDto, { shippingMethod: 'teleport' });
-    const errors = await validate(dto);
-    expect(errors.some((e) => e.property === 'shippingMethod')).toBe(true);
-  });
-
-  it('accepts a valid shippingMethod', async () => {
+// Loop 27: shippingMethod deixou de ser um enum fechado de 3 valores na DTO — agora também aceita
+// o id de uma cotação real da Melhor Envio ("me:<id>"). A DTO só valida "é uma string razoável";
+// "esse método é de verdade válido" é responsabilidade do OrderDraftsService (resolveShipping),
+// testado no describe "shipping real (Loop 27)" mais abaixo — nunca confiar num preço vindo do
+// cliente é o princípio que continua, só a forma da validação mudou.
+describe('PublicPatchDraftDto — shippingMethod aceita fixo ou cotação real (Loop 27)', () => {
+  it('aceita um dos 3 métodos fixos de sempre', async () => {
     const dto = plainToInstance(PublicPatchDraftDto, { shippingMethod: 'express' });
     const errors = await validate(dto);
     expect(errors.some((e) => e.property === 'shippingMethod')).toBe(false);
+  });
+
+  it('aceita o id de uma cotação real da Melhor Envio ("me:<id>")', async () => {
+    const dto = plainToInstance(PublicPatchDraftDto, { shippingMethod: 'me:1' });
+    const errors = await validate(dto);
+    expect(errors.some((e) => e.property === 'shippingMethod')).toBe(false);
+  });
+
+  it('rejeita um valor absurdamente longo (proteção básica contra abuso, não mais um enum)', async () => {
+    const dto = plainToInstance(PublicPatchDraftDto, { shippingMethod: 'x'.repeat(200) });
+    const errors = await validate(dto);
+    expect(errors.some((e) => e.property === 'shippingMethod')).toBe(true);
+  });
+});
+
+describe('OrderDraftsService — shipping real via Melhor Envio (Loop 27)', () => {
+  const tenantId = new Types.ObjectId().toString();
+  const variantId = new Types.ObjectId();
+
+  const draftModel: any = { findOne: jest.fn() };
+  const variantModel: any = { find: jest.fn() };
+  const orders: any = { create: jest.fn() };
+  const payments: any = { createPixPayment: jest.fn() };
+  const customers: any = { findByWaId: jest.fn(), create: jest.fn() };
+  const products: any = { getWholesalePricingBatch: jest.fn() };
+  const promotions: any = { validateAndComputeDiscount: jest.fn() };
+  const notify: any = { sendStaffEmail: jest.fn().mockResolvedValue(undefined), logStaffAlert: jest.fn() };
+  const config: any = { get: jest.fn().mockReturnValue('') };
+  const excel: any = {};
+  const tenants: any = { findById: jest.fn() };
+  const shippingQuotes: any = { quote: jest.fn() };
+
+  const service = new OrderDraftsService(
+    draftModel,
+    variantModel,
+    orders,
+    payments,
+    customers,
+    products,
+    promotions,
+    notify,
+    config,
+    excel,
+    tenants,
+    shippingQuotes,
+  );
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    products.getWholesalePricingBatch.mockResolvedValue(new Map());
+  });
+
+  function draftWithLine() {
+    return draftDoc({
+      lines: [{ variantId, quantity: 1, unitPrice: 50 }],
+    });
+  }
+
+  it('AC6: escolher uma cotação real grava shippingCost + shippingQuote a partir da opção retornada', async () => {
+    variantModel.find.mockReturnValue(chain([{ _id: variantId, quantityOnHand: 10, sku: 'SKU-1' }]));
+    const doc = draftWithLine();
+    draftModel.findOne.mockReturnValue(chain(doc));
+    shippingQuotes.quote.mockResolvedValue([
+      { method: 'pickup', label: 'Retirada', price: 0, isPickup: true },
+      { method: 'me:1', label: 'PAC (Correios)', price: 37.79, deliveryDays: 9 },
+    ]);
+
+    await service.patchByToken(tenantId, 'tok', {
+      shippingMethod: 'me:1',
+      destinationCep: '80010000',
+    } as any);
+
+    expect(shippingQuotes.quote).toHaveBeenCalledWith(tenantId, '80010000', [
+      { variantId: String(variantId), quantity: 1 },
+    ]);
+    expect(doc.shippingCost).toBe(37.79);
+    expect(doc.shippingQuote).toEqual({ method: 'me:1', label: 'PAC (Correios)', price: 37.79, deliveryDays: 9 });
+  });
+
+  it('rejeita uma cotação real sem CEP de destino informado', async () => {
+    variantModel.find.mockReturnValue(chain([{ _id: variantId, quantityOnHand: 10, sku: 'SKU-1' }]));
+    const doc = draftWithLine();
+    draftModel.findOne.mockReturnValue(chain(doc));
+
+    await expect(
+      service.patchByToken(tenantId, 'tok', { shippingMethod: 'me:1' } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(shippingQuotes.quote).not.toHaveBeenCalled();
+  });
+
+  it('rejeita um id de cotação que não bate com nenhuma opção real devolvida agora (preço nunca vem do cliente)', async () => {
+    variantModel.find.mockReturnValue(chain([{ _id: variantId, quantityOnHand: 10, sku: 'SKU-1' }]));
+    const doc = draftWithLine();
+    draftModel.findOne.mockReturnValue(chain(doc));
+    shippingQuotes.quote.mockResolvedValue([{ method: 'pickup', label: 'Retirada', price: 0, isPickup: true }]);
+
+    await expect(
+      service.patchByToken(tenantId, 'tok', {
+        shippingMethod: 'me:999',
+        destinationCep: '80010000',
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('AC7: pickup/standard/express continuam pelo caminho de sempre — nunca chamam ShippingQuoteService', async () => {
+    variantModel.find.mockReturnValue(chain([{ _id: variantId, quantityOnHand: 10, sku: 'SKU-1' }]));
+    tenants.findById.mockResolvedValue({ shippingConfig: { standardFee: 19.9, expressFee: 39.9 } });
+    const doc = draftWithLine();
+    draftModel.findOne.mockReturnValue(chain(doc));
+
+    await service.patchByToken(tenantId, 'tok', { shippingMethod: 'express' } as any);
+
+    expect(shippingQuotes.quote).not.toHaveBeenCalled();
+    expect(doc.shippingCost).toBe(39.9);
+    expect(doc.shippingQuote).toBeUndefined();
   });
 });
 
@@ -266,6 +384,7 @@ describe('OrderDraftsService.submitByToken — happy path (pix)', () => {
   const config: any = { get: jest.fn().mockReturnValue('') };
   const excel: any = {};
   const tenants: any = { findById: jest.fn().mockResolvedValue({ pricingDisplay: { pixDiscountPercent: 0 } }) };
+  const shippingQuotes: any = { quote: jest.fn() };
 
   const service = new OrderDraftsService(
     draftModel,
@@ -279,6 +398,7 @@ describe('OrderDraftsService.submitByToken — happy path (pix)', () => {
     config,
     excel,
     tenants,
+    shippingQuotes,
   );
 
   beforeEach(() => {

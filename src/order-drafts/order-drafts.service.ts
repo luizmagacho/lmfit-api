@@ -17,6 +17,7 @@ import { CustomersService } from '../customers/customers.service';
 import { ProductsService } from '../products/products.service';
 import { PromotionsService } from '../promotions/promotions.service';
 import { TenantsService } from '../tenants/tenants.service';
+import { ShippingQuoteService } from '../shipping/shipping-quote.service';
 import { ProductVariant } from '../products/schemas/product-variant.schema';
 import {
   ORDER_DRAFT_EXPORT_COLUMNS,
@@ -44,6 +45,7 @@ export class OrderDraftsService {
     private readonly config: ConfigService,
     private readonly excel: ExcelSpreadsheetService,
     private readonly tenants: TenantsService,
+    private readonly shippingQuotes: ShippingQuoteService,
   ) {}
 
   async createPublic(tenantId: string, dto: PublicCreateDraftDto) {
@@ -180,6 +182,9 @@ export class OrderDraftsService {
     if (dto.shippingMethod !== undefined) {
       doc.shippingMethod = dto.shippingMethod;
     }
+    if (dto.destinationCep !== undefined) {
+      doc.destinationCep = dto.destinationCep;
+    }
     if (trustClientShipping) {
       // Staff/admin editando um rascunho manualmente pode arbitrar um valor de frete (ex.:
       // cotação combinada por telefone) — só o comprador anônimo nunca tem esse valor aceito.
@@ -187,7 +192,14 @@ export class OrderDraftsService {
         doc.shippingCost = dto.shippingCost;
       }
     } else if (dto.shippingMethod !== undefined) {
-      doc.shippingCost = await this.computeShippingCost(tenantId, dto.shippingMethod, doc.lines);
+      const resolved = await this.resolveShipping(
+        tenantId,
+        dto.shippingMethod,
+        doc.lines,
+        dto.destinationCep ?? doc.destinationCep,
+      );
+      doc.shippingCost = resolved.cost;
+      doc.shippingQuote = resolved.quote;
     }
     if (dto.couponCode !== undefined) {
       const code = dto.couponCode.trim();
@@ -264,6 +276,42 @@ export class OrderDraftsService {
       if (subtotal >= threshold) return 0;
     }
     return fee;
+  }
+
+  /**
+   * Loop 27 — porta de entrada do checkout público pra QUALQUER frete: os 3 métodos fixos de
+   * sempre continuam pelo caminho de `computeShippingCost` de sempre (zero mudança de
+   * comportamento, AC7); um `method` no formato `"me:<id>"` valida a escolha contra uma cotação
+   * real recém-feita (nunca aceita um preço vindo do cliente — mesmo princípio já usado pro
+   * cupom). Se o id não bater com nenhuma opção real devolvida agora, rejeita — a cotação pode ter
+   * expirado ou mudado (ex.: peso do carrinho mudou desde a última cotação).
+   */
+  private async resolveShipping(
+    tenantId: string,
+    method: string,
+    lines: OrderDraft['lines'],
+    destinationCep?: string,
+  ): Promise<{ cost: number; quote: OrderDraft['shippingQuote'] }> {
+    if (!method.startsWith('me:')) {
+      const cost = await this.computeShippingCost(tenantId, method as 'pickup' | 'standard' | 'express', lines);
+      return { cost, quote: undefined };
+    }
+    if (!destinationCep) {
+      throw new BadRequestException('CEP de destino é obrigatório para essa opção de frete');
+    }
+    const options = await this.shippingQuotes.quote(
+      tenantId,
+      destinationCep,
+      lines.map((l) => ({ variantId: String(l.variantId), quantity: l.quantity })),
+    );
+    const chosen = options.find((o) => o.method === method);
+    if (!chosen) {
+      throw new BadRequestException('Opção de frete inválida ou expirada — cote novamente');
+    }
+    return {
+      cost: chosen.price,
+      quote: { method: chosen.method, label: chosen.label, price: chosen.price, deliveryDays: chosen.deliveryDays },
+    };
   }
 
   async patchByToken(
@@ -429,6 +477,7 @@ export class OrderDraftsService {
           lines: pixLineInputs,
           shippingMethod: doc.shippingMethod,
           shippingCost: doc.shippingCost,
+          shippingServiceLabel: doc.shippingQuote?.label,
           couponCode: doc.couponCode,
           discountTotal: doc.discountTotal,
           creditApplied,
@@ -480,6 +529,7 @@ export class OrderDraftsService {
           lines: lineInputs,
           shippingMethod: doc.shippingMethod,
           shippingCost: doc.shippingCost,
+          shippingServiceLabel: doc.shippingQuote?.label,
           couponCode: doc.couponCode,
           discountTotal: doc.discountTotal,
           creditApplied,
@@ -526,6 +576,7 @@ export class OrderDraftsService {
       lines: lineInputs,
       shippingMethod: doc.shippingMethod,
       shippingCost: doc.shippingCost,
+      shippingServiceLabel: doc.shippingQuote?.label,
       couponCode: doc.couponCode,
       discountTotal: doc.discountTotal,
       creditApplied: manualCreditApplied,

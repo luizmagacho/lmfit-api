@@ -593,6 +593,9 @@ export class ProductsService {
       images: dto.images ?? [],
       barcode: dto.barcode,
       weightGrams: dto.weightGrams,
+      widthCm: dto.widthCm,
+      heightCm: dto.heightCm,
+      lengthCm: dto.lengthCm,
       sourceType: dto.sourceType ?? 'manufactured',
       costPrice: dto.costPrice,
       markupPercent: dto.markupPercent,
@@ -1069,6 +1072,9 @@ export class ProductsService {
     if (dto.images !== undefined) patch.images = dto.images;
     if (dto.barcode !== undefined) patch.barcode = dto.barcode;
     if (dto.weightGrams !== undefined) patch.weightGrams = dto.weightGrams;
+    if (dto.widthCm !== undefined) patch.widthCm = dto.widthCm;
+    if (dto.heightCm !== undefined) patch.heightCm = dto.heightCm;
+    if (dto.lengthCm !== undefined) patch.lengthCm = dto.lengthCm;
     if (dto.sourceType !== undefined) patch.sourceType = dto.sourceType;
     if (dto.costPrice !== undefined) patch.costPrice = dto.costPrice;
     if (dto.markupPercent !== undefined) patch.markupPercent = dto.markupPercent;

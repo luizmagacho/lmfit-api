@@ -312,6 +312,7 @@ export class OrdersService {
       lines,
       shippingMethod: dto.shippingMethod,
       shippingCost,
+      shippingServiceLabel: dto.shippingServiceLabel,
       couponCode: dto.couponCode,
       discountTotal,
       creditApplied,

@@ -25,10 +25,20 @@ export class StaffPatchOrderDraftDto {
   @IsString()
   paymentMethodChoice?: string;
 
+  // Loop 27: string livre (não mais um enum fechado) pra também aceitar o id de uma cotação real
+  // da Melhor Envio ("me:<id>") — mesmo motivo do campo equivalente em PublicPatchDraftDto. O staff
+  // sempre usa `trustClientShipping: true` (vê `patchForStaff` abaixo), então esse campo nunca passa
+  // pela validação de cotação real; o tipo só precisa bater com o de `PublicPatchDraftDto` porque
+  // `patchByToken` reaproveita este mesmo `applyDraftPatch()` fazendo um cast pra este DTO.
   @ApiPropertyOptional({ enum: ['pickup', 'standard', 'express'] })
   @IsOptional()
-  @IsEnum(['pickup', 'standard', 'express'])
-  shippingMethod?: 'pickup' | 'standard' | 'express';
+  @IsString()
+  shippingMethod?: string;
+
+  @ApiPropertyOptional({ description: 'CEP de destino — só relevante quando shippingMethod é uma cotação real ("me:*").' })
+  @IsOptional()
+  @IsString()
+  destinationCep?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

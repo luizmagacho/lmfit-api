@@ -28,6 +28,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { EncryptionModule } from './common/encryption.module';
 import { OrderDraftsModule } from './order-drafts/order-drafts.module';
 import { OrdersModule } from './orders/orders.module';
+import { ShippingModule } from './shipping/shipping.module';
 import { ProductsModule } from './products/products.module';
 import { PurchasesModule } from './purchases/purchases.module';
 import { PromotionsModule } from './promotions/promotions.module';
@@ -90,6 +91,7 @@ import { SentryContextInterceptor } from './common/interceptors/sentry-context.i
     CatalogModule,
     ChatModule,
     OrderDraftsModule,
+    ShippingModule,
     WhatsappModule,
     CashflowModule,
     ProductionModule,

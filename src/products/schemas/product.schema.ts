@@ -63,6 +63,18 @@ export class Product {
   @Prop({ type: Number })
   weightGrams?: number;
 
+  /** Dimensões de embalagem em cm (Loop 27) — junto com `weightGrams`, é o que
+   *  `ShippingQuoteService` precisa pra cotar frete real via Melhor Envio. Produto sem os 4 campos
+   *  preenchidos cai automaticamente no fallback de taxa fixa (nunca cotação com dado incompleto). */
+  @Prop({ type: Number })
+  widthCm?: number;
+
+  @Prop({ type: Number })
+  heightCm?: number;
+
+  @Prop({ type: Number })
+  lengthCm?: number;
+
   /** 'ready_made' = comprado pronto de fornecedor (custo + margem definem o preço); 'manufactured' = produzido internamente (custo vem do módulo de produção). */
   @Prop({ type: String, enum: ['manufactured', 'ready_made'], default: 'manufactured' })
   sourceType: 'manufactured' | 'ready_made';
