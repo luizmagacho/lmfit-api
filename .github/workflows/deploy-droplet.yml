@@ -28,6 +28,12 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      # Loop 26 — canário do caminho do dinheiro: exercita catálogo → draft → patch → submit contra
+      # um Mongo em memória (mongodb-memory-server, baixado sob demanda pelo runner), sem mock de
+      # pricing/estoque. Ver docs/ecommerce/specs/loop-26-money-path-canary.md.
+      - name: Integration tests (checkout money path)
+        run: npm run test:e2e
+
   build-and-push:
     needs: test
     runs-on: ubuntu-latest

@@ -8,12 +8,16 @@ import {
   PublicPatchDraftDto,
 } from './dto/public-patch-draft.dto';
 import { PublicSubmitDraftDto } from './dto/public-submit-draft.dto';
+import { CheckoutAlertService } from './checkout-alert.service';
 import { OrderDraftsService } from './order-drafts.service';
 
 @ApiTags('public-order-drafts')
 @Controller('public/order-drafts')
 export class PublicOrderDraftsController {
-  constructor(private readonly drafts: OrderDraftsService) {}
+  constructor(
+    private readonly drafts: OrderDraftsService,
+    private readonly alerts: CheckoutAlertService,
+  ) {}
 
   @Post()
   create(@TenantId() tenantId: string, @Body() dto: PublicCreateDraftDto) {
@@ -39,11 +43,20 @@ export class PublicOrderDraftsController {
   // public-payments.controller.ts (dev-confirm/simulate-confirm), já que submit cria pedido real.
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post(':token/submit')
-  submit(
+  async submit(
     @TenantId() tenantId: string,
     @Param('token') token: string,
     @Body() body: PublicSubmitDraftDto,
   ) {
-    return this.drafts.submitByToken(tenantId, token, body);
+    // Loop 26 — a resposta de erro pro cliente não muda em nada; o catch é só pra reportar antes
+    // de repropagar a mesma exceção. Ver CheckoutAlertService: SentryGlobalFilter (global) não
+    // reporta HttpException com status < 500 por padrão, e o bug de 12/08 era um 400 disfarçado
+    // de rejeição de negócio — sem essa captura explícita, teria continuado invisível.
+    try {
+      return await this.drafts.submitByToken(tenantId, token, body);
+    } catch (err) {
+      await this.alerts.reportSubmitFailure(tenantId, err);
+      throw err;
+    }
   }
 }
