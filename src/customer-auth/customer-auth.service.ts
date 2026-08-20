@@ -219,6 +219,7 @@ export class CustomerAuthService {
       name: customer.name,
       email: customer.email ?? null,
       phone: customer.phone ?? null,
+      customerCode: customer.customerCode ?? null,
       loyaltyPoints: customer.loyaltyPoints ?? 0,
       storeCreditBalance: customer.storeCreditBalance ?? 0,
       redeemValuePerPoint: tenant?.loyalty?.redeemValuePerPoint ?? 0.01,

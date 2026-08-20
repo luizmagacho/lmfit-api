@@ -41,6 +41,46 @@ describe('TenantsService — config writes invalidate the public slug cache (Loo
     expect((service as any).slugCache.has(slug)).toBe(false);
   });
 
+  // Loop 27 — frete real via Melhor Envio.
+  it('updateShippingConfig (Loop 27) sets the origin address flat under shippingConfig', async () => {
+    const originAddress = { cep: '01310930', logradouro: 'Av. Paulista', numero: '1000', bairro: 'Bela Vista', cidade: 'São Paulo', uf: 'SP' };
+    await service.updateShippingConfig(tenantId, { originAddress } as any);
+
+    expect(tenantModel.findByIdAndUpdate).toHaveBeenCalledWith(
+      tenantId,
+      { $set: { 'shippingConfig.originAddress': originAddress } },
+      { new: true },
+    );
+  });
+
+  it('updateShippingConfig (Loop 27) encrypts the Melhor Envio token before saving', async () => {
+    await service.updateShippingConfig(tenantId, { melhorEnvioToken: 'plain-token-123' } as any);
+
+    const call = tenantModel.findByIdAndUpdate.mock.calls.at(-1);
+    const stored = call[1].$set['shippingConfig.melhorEnvio.token'];
+    expect(stored).not.toBe('plain-token-123');
+    expect(encryption.isEncrypted(stored)).toBe(true);
+    expect(encryption.decrypt(stored)).toBe('plain-token-123');
+  });
+
+  it('updateShippingConfig (Loop 27) never touches the saved token when melhorEnvioToken is empty/omitted', async () => {
+    await service.updateShippingConfig(tenantId, { melhorEnvioToken: '   ', standardFee: 25 } as any);
+
+    const call = tenantModel.findByIdAndUpdate.mock.calls.at(-1);
+    expect(call[1].$set).not.toHaveProperty('shippingConfig.melhorEnvio.token');
+    expect(call[1].$set).toEqual({ 'shippingConfig.standardFee': 25 });
+  });
+
+  it('updateShippingConfig (Loop 27) sets melhorEnvioAmbiente flat', async () => {
+    await service.updateShippingConfig(tenantId, { melhorEnvioAmbiente: 'producao' } as any);
+
+    expect(tenantModel.findByIdAndUpdate).toHaveBeenCalledWith(
+      tenantId,
+      { $set: { 'shippingConfig.melhorEnvio.ambiente': 'producao' } },
+      { new: true },
+    );
+  });
+
   it('updatePricingDisplay invalidates the cached slug entry', async () => {
     await service.updatePricingDisplay(tenantId, { pixDiscountPercent: 10 });
     expect((service as any).slugCache.has(slug)).toBe(false);

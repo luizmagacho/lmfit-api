@@ -135,6 +135,17 @@ export class CustomersController {
     return doc;
   }
 
+  /** PDV: identifica o cliente escaneando a carteirinha dele (Loop 34). */
+  @Get('by-code/:code')
+  async findByCode(
+    @Param('code') code: string,
+    @TenantId() tenantId: string,
+  ) {
+    const doc = await this.customers.findByCode(tenantId, code);
+    if (!doc) throw new NotFoundException();
+    return doc;
+  }
+
   @Get(':id')
   findOne(
     @Param('id') id: string,

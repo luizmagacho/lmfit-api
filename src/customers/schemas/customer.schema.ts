@@ -33,6 +33,14 @@ export class Customer {
   @Prop({ trim: true, index: true, sparse: true })
   whatsappWaId?: string;
 
+  /** Código curto pra identificação rápida (código de barras no PDV) — gerado
+   * automaticamente na criação via CountersService, formato "CLI-000001". Nunca
+   * atribuído ao walk-in ("Consumidor Final"), que não passa por create(). Sem `sparse`/`index`
+   * aqui: isso criaria um índice single-field implícito (não escopado por tenant) por baixo do
+   * pano — a unicidade real vive só no índice composto explícito abaixo. */
+  @Prop({ trim: true })
+  customerCode?: string;
+
   @Prop({ type: [AddressSchema], default: [] })
   addresses: Address[];
 
@@ -66,6 +74,15 @@ export class Customer {
 
 export const CustomerSchema = SchemaFactory.createForClass(Customer);
 CustomerSchema.index({ tenantId: 1, createdAt: -1 });
+// `sparse` num índice COMPOSTO só pula um doc se TODOS os campos do índice estiverem ausentes —
+// como `tenantId` está sempre presente, `sparse` sozinho não excluiria nenhum documento sem
+// `customerCode` (todos colidiriam em `(tenantId, null)`). `partialFilterExpression` é a forma
+// correta de "único só quando presente" num índice composto (Loop 35 — achado ao vivo enquanto
+// caía no mesmo problema pro `barcode` de variante).
+CustomerSchema.index(
+  { tenantId: 1, customerCode: 1 },
+  { unique: true, partialFilterExpression: { customerCode: { $exists: true } } },
+);
 CustomerSchema.index(
   { name: 'text', email: 'text', phone: 'text' },
   { weights: { name: 10, email: 5, phone: 5 }, name: 'customer_text_search' },

@@ -17,6 +17,7 @@ import {
 import type { CreateCustomerDto } from './dto/create-customer.dto';
 import type { UpdateCustomerDto } from './dto/update-customer.dto';
 import { Customer, type CustomerDocument } from './schemas/customer.schema';
+import { CountersService } from '../common/counters/counters.service';
 
 type AddressFields = {
   label?: string;
@@ -34,14 +35,30 @@ export class CustomersService {
   constructor(
     @InjectModel(Customer.name) private readonly model: Model<Customer>,
     private readonly excel: ExcelSpreadsheetService,
+    private readonly counters: CountersService,
   ) {}
 
+  /** "CLI-000001" — mesmo mecanismo atômico por tenant do número de pedido (Loop 34). */
+  static formatCustomerCode(seq: number): string {
+    return `CLI-${String(seq).padStart(6, '0')}`;
+  }
+
   async create(tenantId: string, dto: CreateCustomerDto, createdBy?: string) {
+    const seq = await this.counters.next(tenantId, 'customer');
     return this.model.create({
       ...dto,
       tenantId: new Types.ObjectId(tenantId),
       createdBy: createdBy ? new Types.ObjectId(createdBy) : undefined,
+      customerCode: CustomersService.formatCustomerCode(seq),
     });
+  }
+
+  async findByCode(tenantId: string, code: string) {
+    const doc = await this.model
+      .findOne({ tenantId: new Types.ObjectId(tenantId), customerCode: code.trim() })
+      .lean()
+      .exec();
+    return doc;
   }
 
   private listFilter(tenantId: string, search?: string) {

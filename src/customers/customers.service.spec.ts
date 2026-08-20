@@ -12,7 +12,8 @@ describe('CustomersService — e-mail lookup/dedup (Loop 7)', () => {
   const tenantId = new Types.ObjectId().toString();
   const model: any = { findOne: jest.fn(), create: jest.fn() };
   const excel: any = {};
-  const service = new CustomersService(model, excel);
+  const counters: any = { next: jest.fn().mockResolvedValue(1) };
+  const service = new CustomersService(model, excel, counters);
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -51,12 +52,66 @@ describe('CustomersService — e-mail lookup/dedup (Loop 7)', () => {
   });
 });
 
+describe('CustomersService.create — customerCode auto-assignment (Loop 34)', () => {
+  const tenantId = new Types.ObjectId().toString();
+  const model: any = { create: jest.fn() };
+  const excel: any = {};
+  const counters: any = { next: jest.fn() };
+  const service = new CustomersService(model, excel, counters);
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('pulls the next atomic per-tenant "customer" sequence and formats it as CLI-000042', async () => {
+    counters.next.mockResolvedValue(42);
+    model.create.mockResolvedValue({ _id: 'c1' });
+    await service.create(tenantId, { name: 'Ana' } as any);
+    expect(counters.next).toHaveBeenCalledWith(tenantId, 'customer');
+    expect(model.create).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Ana', customerCode: 'CLI-000042' }),
+    );
+  });
+
+  it('a client-supplied customerCode in the DTO is always overwritten by the generated one', async () => {
+    counters.next.mockResolvedValue(7);
+    model.create.mockResolvedValue({ _id: 'c2' });
+    await service.create(tenantId, { name: 'Bea', customerCode: 'FAKE-CODE' } as any);
+    expect(model.create).toHaveBeenCalledWith(
+      expect.objectContaining({ customerCode: 'CLI-000007' }),
+    );
+  });
+});
+
+describe('CustomersService.findByCode (Loop 34)', () => {
+  const tenantId = new Types.ObjectId().toString();
+  const model: any = { findOne: jest.fn() };
+  const excel: any = {};
+  const counters: any = {};
+  const service = new CustomersService(model, excel, counters);
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('looks up by tenantId + trimmed customerCode', async () => {
+    model.findOne.mockReturnValue(chain({ _id: 'c1', customerCode: 'CLI-000001' }));
+    const out = await service.findByCode(tenantId, '  CLI-000001  ');
+    expect(model.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({ customerCode: 'CLI-000001' }),
+    );
+    expect(out).toEqual({ _id: 'c1', customerCode: 'CLI-000001' });
+  });
+
+  it('returns null when no customer matches (never throws)', async () => {
+    model.findOne.mockReturnValue(chain(null));
+    const out = await service.findByCode(tenantId, 'CLI-999999');
+    expect(out).toBeNull();
+  });
+});
+
 describe('CustomersService.applyStoreCredit (Loop 9)', () => {
   const tenantId = new Types.ObjectId().toString();
   const customerId = new Types.ObjectId().toString();
   const model: any = { findOne: jest.fn(), findOneAndUpdate: jest.fn() };
   const excel: any = {};
-  const service = new CustomersService(model, excel);
+  const service = new CustomersService(model, excel, {} as any);
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -111,7 +166,7 @@ describe('CustomersService wishlist (Loop 9 continuation)', () => {
   const productId = new Types.ObjectId().toString();
   const model: any = { findOne: jest.fn(), findOneAndUpdate: jest.fn() };
   const excel: any = {};
-  const service = new CustomersService(model, excel);
+  const service = new CustomersService(model, excel, {} as any);
 
   beforeEach(() => jest.clearAllMocks());
 

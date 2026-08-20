@@ -257,6 +257,18 @@ export class TenantsService {
     if (dto.standardFee !== undefined) setFields['shippingConfig.standardFee'] = dto.standardFee;
     if (dto.expressFee !== undefined) setFields['shippingConfig.expressFee'] = dto.expressFee;
     if (dto.freeAboveTotal !== undefined) setFields['shippingConfig.freeAboveTotal'] = dto.freeAboveTotal;
+    if (dto.originAddress !== undefined) {
+      setFields['shippingConfig.originAddress'] = dto.originAddress;
+    }
+    // Loop 27 — só troca o token quando o merchant de fato digitou um novo valor; string vazia ou
+    // campo ausente preserva o que já estava salvo (mesmo princípio de "nunca reenviar segredo em
+    // texto puro" usado pros tokens de analytics/Meta).
+    if (dto.melhorEnvioToken !== undefined && dto.melhorEnvioToken.trim()) {
+      setFields['shippingConfig.melhorEnvio.token'] = this.encryption.encrypt(dto.melhorEnvioToken.trim());
+    }
+    if (dto.melhorEnvioAmbiente !== undefined) {
+      setFields['shippingConfig.melhorEnvio.ambiente'] = dto.melhorEnvioAmbiente;
+    }
 
     const doc = await this.tenantModel
       .findByIdAndUpdate(id, { $set: setFields }, { new: true })

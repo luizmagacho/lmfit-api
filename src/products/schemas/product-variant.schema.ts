@@ -61,3 +61,11 @@ export class ProductVariant {
 export const ProductVariantSchema = SchemaFactory.createForClass(ProductVariant);
 ProductVariantSchema.index({ tenantId: 1, sku: 1 }, { unique: true });
 ProductVariantSchema.index({ productId: 1 });
+// `sparse` num índice COMPOSTO só pula um doc se TODOS os campos do índice estiverem ausentes —
+// como `tenantId` está sempre presente, `sparse` sozinho não excluiria nenhuma variante sem
+// `barcode` (todas colidiriam em `(tenantId, null)`). `partialFilterExpression` é a forma correta
+// de "único só quando presente" num índice composto.
+ProductVariantSchema.index(
+  { tenantId: 1, barcode: 1 },
+  { unique: true, partialFilterExpression: { barcode: { $exists: true } } },
+);

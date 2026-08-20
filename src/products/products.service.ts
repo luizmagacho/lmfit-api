@@ -30,6 +30,7 @@ import {
 } from './product-excel.constants';
 import { LocationsService } from '../locations/locations.service';
 import { buildSearchFilter, escapeRegex } from '../common/utils/text-search.util';
+import { CountersService } from '../common/counters/counters.service';
 
 function slugifyFromName(name: string): string {
   const s = name
@@ -53,7 +54,48 @@ export class ProductsService {
     private readonly excel: ExcelSpreadsheetService,
     private readonly eventEmitter: EventEmitter2,
     private readonly locations: LocationsService,
+    private readonly counters: CountersService,
   ) {}
+
+  /** EAN-13 real, auto-atribuído — usa a faixa de prefixo "200" que a própria GS1 reserva pra
+   *  "Restricted Circulation Numbers" (uso interno da empresa, sem precisar de registro pago):
+   *  200 (prefixo) + 9 dígitos (sequência atômica por tenant via CountersService) + 1 dígito
+   *  verificador = 13 dígitos. Legítimo pra qualquer leitor de mercado, mas — por design da GS1 —
+   *  não garantido único entre empresas diferentes (não deve ser usado fora do próprio caixa). */
+  static formatVariantBarcode(seq: number): string {
+    const body = `200${String(seq).padStart(9, '0')}`;
+    return body + ProductsService.ean13CheckDigit(body);
+  }
+
+  /** Dígito verificador padrão EAN-13/UPC: soma ponderada (peso 1 nas posições ímpares, peso 3
+   *  nas pares, contando da esquerda) sobre os 12 primeiros dígitos. */
+  static ean13CheckDigit(twelveDigits: string): number {
+    let sum = 0;
+    for (let i = 0; i < 12; i++) {
+      const digit = Number(twelveDigits[i]);
+      sum += i % 2 === 0 ? digit : digit * 3;
+    }
+    return (10 - (sum % 10)) % 10;
+  }
+
+  /** Loop 35 — devolve o código informado (nunca sobrescreve um EAN/GTIN real digitado), ou gera
+   *  um código interno da loja quando a variante não tem nenhum. */
+  private async resolveVariantBarcode(tenantId: string, provided?: string): Promise<string | undefined> {
+    const trimmed = provided?.trim();
+    if (trimmed) return trimmed;
+    const seq = await this.counters.next(tenantId, 'variant-barcode');
+    return ProductsService.formatVariantBarcode(seq);
+  }
+
+  /** Distingue um E11000 do índice de `sku` do novo índice de `barcode` (Loop 35) — sem isso, um
+   *  EAN duplicado mostraria "SKU já em uso", uma mensagem errada pro que de fato colidiu. */
+  private duplicateVariantFieldMessage(e: unknown, sku: string): string {
+    const keyPattern = (e as { keyPattern?: Record<string, unknown> })?.keyPattern;
+    if (keyPattern && 'barcode' in keyPattern) {
+      return 'Código de barras já em uso por outra variante';
+    }
+    return `SKU já em uso: ${sku}`;
+  }
 
   private resolveVariantRetail(it: ProductVariantUpsertDto): number {
     const raw = it.priceRetail ?? it.price;
@@ -466,6 +508,7 @@ export class ProductsService {
               tenantId: new Types.ObjectId(tenantId),
               productId,
               ...payload,
+              barcode: await this.resolveVariantBarcode(tenantId, payload.barcode as string | undefined),
               reorderPoint: 0,
             });
             if (qty !== 0) {
@@ -488,7 +531,7 @@ export class ProductsService {
               'code' in e &&
               (e as { code: number }).code === 11000
             ) {
-              throw new ConflictException({ message: `SKU já em uso: ${sku}` });
+              throw new ConflictException({ message: this.duplicateVariantFieldMessage(e, sku) });
             }
             throw e;
           }
@@ -500,6 +543,7 @@ export class ProductsService {
             tenantId: new Types.ObjectId(tenantId),
             productId,
             ...payload,
+            barcode: await this.resolveVariantBarcode(tenantId, payload.barcode as string | undefined),
             reorderPoint: 0,
           });
           if (qty !== 0) {
@@ -520,7 +564,7 @@ export class ProductsService {
             'code' in e &&
             (e as { code: number }).code === 11000
           ) {
-            throw new ConflictException({ message: `SKU já em uso: ${sku}` });
+            throw new ConflictException({ message: this.duplicateVariantFieldMessage(e, sku) });
           }
           throw e;
         }
@@ -659,6 +703,7 @@ export class ProductsService {
             price: retail,
             priceWholesale: vWholesale,
             minWholesaleQty: dto.minWholesaleQty,
+            barcode: await this.resolveVariantBarcode(tenantId, dto.barcode),
             quantityOnHand: qty,
             reorderPoint: 0,
             images: [],
@@ -680,7 +725,7 @@ export class ProductsService {
             'code' in e &&
             (e as { code: number }).code === 11000
           ) {
-            throw new ConflictException({ message: `SKU já em uso: ${dto.sku.trim()}` });
+            throw new ConflictException({ message: this.duplicateVariantFieldMessage(e, dto.sku.trim()) });
           }
           throw e;
         }
@@ -1127,7 +1172,7 @@ export class ProductsService {
       priceWholesale: dto.priceWholesale,
       minWholesaleQty: dto.minWholesaleQty,
       compareAtPrice: dto.compareAtPrice,
-      barcode: dto.barcode,
+      barcode: await this.resolveVariantBarcode(tenantId, dto.barcode),
       quantityOnHand: qty,
       reorderPoint: dto.reorderPoint ?? 0,
       acceptsBackorder: dto.acceptsBackorder ?? false,

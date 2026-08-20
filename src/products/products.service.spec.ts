@@ -9,6 +9,7 @@ import { ProductVariant } from './schemas/product-variant.schema';
 import { StockLedger } from './schemas/stock-ledger.schema';
 import { ExcelSpreadsheetService } from '../common/excel/excel-spreadsheet.service';
 import { LocationsService } from '../locations/locations.service';
+import { CountersService } from '../common/counters/counters.service';
 
 describe('ProductsService — stock movement atomicity', () => {
   let service: ProductsService;
@@ -17,6 +18,7 @@ describe('ProductsService — stock movement atomicity', () => {
   const ledgerModel = { create: jest.fn(), aggregate: jest.fn() };
   const locations = { adjust: jest.fn() };
   const eventEmitter = { emit: jest.fn() };
+  const counters = { next: jest.fn().mockResolvedValue(1) };
   const tenantId = new Types.ObjectId().toString();
   const variantId = new Types.ObjectId().toString();
 
@@ -31,6 +33,7 @@ describe('ProductsService — stock movement atomicity', () => {
         { provide: ExcelSpreadsheetService, useValue: {} },
         { provide: EventEmitter2, useValue: eventEmitter },
         { provide: LocationsService, useValue: locations },
+        { provide: CountersService, useValue: counters },
       ],
     }).compile();
     service = module.get<ProductsService>(ProductsService);
@@ -116,6 +119,7 @@ describe('ProductsService — public catalog filters/sort/pagination (Loop 5)', 
   const ledgerModel = {};
   const locations = {};
   const eventEmitter = { emit: jest.fn() };
+  const counters = { next: jest.fn().mockResolvedValue(1) };
   const tenantId = new Types.ObjectId().toString();
 
   beforeEach(async () => {
@@ -129,6 +133,7 @@ describe('ProductsService — public catalog filters/sort/pagination (Loop 5)', 
         { provide: ExcelSpreadsheetService, useValue: {} },
         { provide: EventEmitter2, useValue: eventEmitter },
         { provide: LocationsService, useValue: locations },
+        { provide: CountersService, useValue: counters },
       ],
     }).compile();
     service = module.get<ProductsService>(ProductsService);
@@ -303,6 +308,7 @@ describe('ProductsService.reserveForOfflineSale — location + tenant-wide recon
     getOrCreateDefault: jest.fn(),
   };
   const eventEmitter = { emit: jest.fn() };
+  const counters = { next: jest.fn().mockResolvedValue(1) };
   const tenantId = new Types.ObjectId().toString();
   const variantId = new Types.ObjectId().toString();
   const locationId = new Types.ObjectId().toString();
@@ -320,6 +326,7 @@ describe('ProductsService.reserveForOfflineSale — location + tenant-wide recon
         { provide: ExcelSpreadsheetService, useValue: {} },
         { provide: EventEmitter2, useValue: eventEmitter },
         { provide: LocationsService, useValue: locations },
+        { provide: CountersService, useValue: counters },
       ],
     }).compile();
     service = module.get<ProductsService>(ProductsService);
@@ -430,6 +437,7 @@ describe('ProductsService — new/edited stock is mirrored into StockLevel at th
   const ledgerModel = { create: jest.fn() };
   const locations = { adjust: jest.fn() };
   const eventEmitter = { emit: jest.fn() };
+  const counters = { next: jest.fn().mockResolvedValue(1) };
   const tenantId = new Types.ObjectId().toString();
 
   beforeEach(async () => {
@@ -451,6 +459,7 @@ describe('ProductsService — new/edited stock is mirrored into StockLevel at th
         { provide: ExcelSpreadsheetService, useValue: {} },
         { provide: EventEmitter2, useValue: eventEmitter },
         { provide: LocationsService, useValue: locations },
+        { provide: CountersService, useValue: counters },
       ],
     }).compile();
     service = module.get<ProductsService>(ProductsService);
@@ -490,5 +499,210 @@ describe('ProductsService — new/edited stock is mirrored into StockLevel at th
 
     // 9 (new) - 5 (previous) = +4, not +9.
     expect(locations.adjust).toHaveBeenCalledWith(tenantId, variantId, 4);
+  });
+});
+
+describe('ProductsService — variant barcode auto-generation (Loop 35)', () => {
+  let service: ProductsService;
+  const productId = new Types.ObjectId();
+  const variantId = new Types.ObjectId();
+  const productModel = { create: jest.fn(), findOne: jest.fn() };
+  const variantModel = {
+    find: jest.fn(),
+    findOne: jest.fn(),
+    create: jest.fn(),
+    updateOne: jest.fn(),
+  };
+  const ledgerModel = { create: jest.fn() };
+  const locations = { adjust: jest.fn() };
+  const eventEmitter = { emit: jest.fn() };
+  const counters = { next: jest.fn() };
+  const tenantId = new Types.ObjectId().toString();
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    ledgerModel.create.mockResolvedValue({});
+    locations.adjust.mockResolvedValue(undefined);
+    variantModel.find.mockReturnValue(chainableResolved([]));
+    variantModel.findOne.mockReturnValue(chainableResolved(null));
+    productModel.findOne.mockReturnValue(chainableResolved({ _id: productId, variants: [] }));
+    productModel.create.mockResolvedValue({ _id: productId });
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ProductsService,
+        { provide: getModelToken(Product.name), useValue: productModel },
+        { provide: getModelToken(ProductVariant.name), useValue: variantModel },
+        { provide: getModelToken(StockLedger.name), useValue: ledgerModel },
+        { provide: ExcelSpreadsheetService, useValue: {} },
+        { provide: EventEmitter2, useValue: eventEmitter },
+        { provide: LocationsService, useValue: locations },
+        { provide: CountersService, useValue: counters },
+      ],
+    }).compile();
+    service = module.get<ProductsService>(ProductsService);
+  });
+
+  it('formatVariantBarcode generates a real EAN-13 in the GS1 internal-use "200" prefix range', () => {
+    expect(ProductsService.formatVariantBarcode(42)).toBe('2000000000428');
+    expect(ProductsService.formatVariantBarcode(1)).toBe('2000000000015');
+    // Every generated code is exactly 13 digits, all numeric — real EAN-13 shape.
+    expect(ProductsService.formatVariantBarcode(999999999)).toMatch(/^200\d{10}$/);
+  });
+
+  it('ean13CheckDigit matches a known real-world EAN-13 (Ferrero Kinder, 4006381333931)', () => {
+    // Confirms the check-digit algorithm itself against a real, independently-verifiable barcode —
+    // not just against our own generator's output.
+    expect(ProductsService.ean13CheckDigit('400638133393')).toBe(1);
+  });
+
+  it('createProduct (variants[] array) generates a barcode for a variant with none', async () => {
+    counters.next.mockResolvedValue(7);
+    variantModel.create.mockResolvedValue({ _id: variantId, toObject: () => ({}) });
+
+    await service.createProduct(tenantId, {
+      name: 'Legging Preta',
+      slug: 'legging-preta',
+      variants: [{ sku: 'LEG-PRE-M', size: 'M', priceRetail: 89.9 }],
+    } as any);
+
+    expect(counters.next).toHaveBeenCalledWith(tenantId, 'variant-barcode');
+    expect(variantModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ barcode: '2000000000077' }),
+    );
+  });
+
+  it('createProduct (variants[] array) never overwrites a manually-entered barcode', async () => {
+    variantModel.create.mockResolvedValue({ _id: variantId, toObject: () => ({}) });
+
+    await service.createProduct(tenantId, {
+      name: 'Legging Preta',
+      slug: 'legging-preta',
+      variants: [{ sku: 'LEG-PRE-M', size: 'M', priceRetail: 89.9, barcode: '7891234567890' }],
+    } as any);
+
+    expect(counters.next).not.toHaveBeenCalled();
+    expect(variantModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ barcode: '7891234567890' }),
+    );
+  });
+
+  it('createProduct (single-SKU shorthand) generates a barcode when dto.barcode is absent', async () => {
+    counters.next.mockResolvedValue(3);
+    variantModel.create.mockResolvedValue({ _id: variantId, toObject: () => ({}) });
+
+    await service.createProduct(tenantId, {
+      name: 'Camiseta Branca',
+      slug: 'camiseta-branca',
+      sku: 'CAM-BR-M',
+      price: 59.9,
+    } as any);
+
+    expect(variantModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ barcode: '2000000000039' }),
+    );
+  });
+
+  it('createVariant generates a barcode when none is provided', async () => {
+    counters.next.mockResolvedValue(9);
+    productModel.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue({ _id: productId }) });
+    variantModel.create.mockResolvedValue({ _id: variantId, toObject: () => ({}) });
+
+    await service.createVariant(tenantId, String(productId), {
+      sku: 'LEG-PRE-G',
+      size: 'G',
+    } as any);
+
+    expect(variantModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ barcode: '2000000000091' }),
+    );
+  });
+
+  it('createVariant never overwrites a manually-entered barcode', async () => {
+    productModel.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue({ _id: productId }) });
+    variantModel.create.mockResolvedValue({ _id: variantId, toObject: () => ({}) });
+
+    await service.createVariant(tenantId, String(productId), {
+      sku: 'LEG-PRE-G',
+      size: 'G',
+      barcode: '7891234567890',
+    } as any);
+
+    expect(counters.next).not.toHaveBeenCalled();
+    expect(variantModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ barcode: '7891234567890' }),
+    );
+  });
+});
+
+describe('ProductsService — duplicate-key message distinguishes sku vs. barcode (Loop 35)', () => {
+  let service: ProductsService;
+  const productModel = { create: jest.fn(), findOne: jest.fn(), deleteOne: jest.fn() };
+  const variantModel = { find: jest.fn(), findOne: jest.fn(), create: jest.fn(), deleteMany: jest.fn() };
+  const ledgerModel = { create: jest.fn(), deleteMany: jest.fn() };
+  const locations = { adjust: jest.fn() };
+  const eventEmitter = { emit: jest.fn() };
+  const counters = { next: jest.fn().mockResolvedValue(1) };
+  const tenantId = new Types.ObjectId().toString();
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    variantModel.find.mockReturnValue(chainableResolved([]));
+    variantModel.findOne.mockReturnValue(chainableResolved(null));
+    variantModel.deleteMany.mockReturnValue(chainableResolved({}));
+    ledgerModel.deleteMany.mockReturnValue(chainableResolved({}));
+    productModel.deleteOne.mockReturnValue(chainableResolved({}));
+    productModel.findOne.mockReturnValue(chainableResolved({ _id: new Types.ObjectId(), variants: [] }));
+    productModel.create.mockResolvedValue({ _id: new Types.ObjectId() });
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ProductsService,
+        { provide: getModelToken(Product.name), useValue: productModel },
+        { provide: getModelToken(ProductVariant.name), useValue: variantModel },
+        { provide: getModelToken(StockLedger.name), useValue: ledgerModel },
+        { provide: ExcelSpreadsheetService, useValue: {} },
+        { provide: EventEmitter2, useValue: eventEmitter },
+        { provide: LocationsService, useValue: locations },
+        { provide: CountersService, useValue: counters },
+      ],
+    }).compile();
+    service = module.get<ProductsService>(ProductsService);
+  });
+
+  it('reports a clear "código de barras" message when the barcode index collides', async () => {
+    const dupError = Object.assign(new Error('E11000 duplicate key'), {
+      code: 11000,
+      keyPattern: { tenantId: 1, barcode: 1 },
+    });
+    variantModel.create.mockRejectedValue(dupError);
+
+    await expect(
+      service.createProduct(tenantId, {
+        name: 'Legging Preta',
+        slug: 'legging-preta',
+        variants: [{ sku: 'LEG-PRE-M', size: 'M', priceRetail: 89.9, barcode: '123' }],
+      } as any),
+    ).rejects.toMatchObject({
+      response: { message: 'Código de barras já em uso por outra variante' },
+    });
+  });
+
+  it('reports the SKU message when the sku index collides (unchanged behavior)', async () => {
+    const dupError = Object.assign(new Error('E11000 duplicate key'), {
+      code: 11000,
+      keyPattern: { tenantId: 1, sku: 1 },
+    });
+    variantModel.create.mockRejectedValue(dupError);
+
+    await expect(
+      service.createProduct(tenantId, {
+        name: 'Legging Preta',
+        slug: 'legging-preta',
+        variants: [{ sku: 'LEG-PRE-M', size: 'M', priceRetail: 89.9 }],
+      } as any),
+    ).rejects.toMatchObject({
+      response: { message: 'SKU já em uso: LEG-PRE-M' },
+    });
   });
 });
