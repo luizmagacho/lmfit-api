@@ -80,20 +80,26 @@ export class WhatsappWebhookController {
     if (!secret) {
       secret = this.config.get<string>('META_APP_SECRET');
     }
-    const raw = req.rawBody;
-    if (secret) {
-      if (!(raw instanceof Buffer)) {
-        this.log.warn('META_APP_SECRET set but raw body missing; rejecting');
-        throw new ForbiddenException();
-      }
-      const expected =
-        'sha256=' + createHmac('sha256', secret).update(raw).digest('hex');
-      const ok =
-        typeof sig === 'string' &&
-        sig.length === expected.length &&
-        timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
-      if (!ok) throw new ForbiddenException();
+    // Sem secret (nem por tenant, nem global) não dá pra verificar assinatura nenhuma — falha
+    // FECHADO (rejeita) em vez de deixar passar sem checar. `fromWaId` no payload é livre; sem essa
+    // barreira qualquer um poderia forjar mensagens se passando por um número da allowlist de staff,
+    // que aciona criação real de pedido/compra pelo `InboundMessageProcessor`.
+    if (!secret) {
+      this.log.warn(`No metaAppSecret configured for tenant "${slug}"; rejecting webhook (fail-closed).`);
+      throw new ForbiddenException();
     }
+    const raw = req.rawBody;
+    if (!(raw instanceof Buffer)) {
+      this.log.warn('META_APP_SECRET set but raw body missing; rejecting');
+      throw new ForbiddenException();
+    }
+    const expected =
+      'sha256=' + createHmac('sha256', secret).update(raw).digest('hex');
+    const ok =
+      typeof sig === 'string' &&
+      sig.length === expected.length &&
+      timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+    if (!ok) throw new ForbiddenException();
 
     const inbound = extractInboundMessages(body);
     if (!inbound.length) {
