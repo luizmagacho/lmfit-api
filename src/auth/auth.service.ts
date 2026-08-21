@@ -144,6 +144,12 @@ export class AuthService {
       role: normalizeRoleForJwt(user.role as UserRole),
       tenantId: String(user.tenantId),
       locationId: user.assignedLocationId ? String(user.assignedLocationId) : undefined,
+      hasSeenTour: user.hasSeenTour === true,
     };
+  }
+
+  async markTourSeen(userId: string) {
+    await this.users.markTourSeen(userId);
+    return { ok: true };
   }
 }

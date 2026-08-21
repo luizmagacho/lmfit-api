@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -38,5 +38,12 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser() user: JwtUserPayload) {
     return this.auth.me(user.sub);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Patch('me/tour-seen')
+  markTourSeen(@CurrentUser() user: JwtUserPayload) {
+    return this.auth.markTourSeen(user.sub);
   }
 }

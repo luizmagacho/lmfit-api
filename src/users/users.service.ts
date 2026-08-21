@@ -93,6 +93,14 @@ export class UsersService {
       .exec();
   }
 
+  async markTourSeen(id: string): Promise<void> {
+    if (!Types.ObjectId.isValid(id)) return;
+    await this.userModel.updateOne(
+      { _id: new Types.ObjectId(id) },
+      { $set: { hasSeenTour: true } },
+    );
+  }
+
   private listFilter(tenantId: string, search?: string) {
     const base: Record<string, any> = { tenantId: new Types.ObjectId(tenantId) };
     if (search) {

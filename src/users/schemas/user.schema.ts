@@ -47,6 +47,11 @@ export class User {
    *  funcionário; opcional, sem valor até um admin atribuir um local. */
   @Prop({ type: Types.ObjectId, ref: 'Location' })
   assignedLocationId?: Types.ObjectId;
+
+  /** Guia de onboarding (AppShell) já mostrada pra este usuário — por usuário no banco, não por
+   *  navegador/dispositivo (localStorage reaparecia a cada troca de aparelho/limpeza de dados). */
+  @Prop({ type: Boolean, default: false })
+  hasSeenTour?: boolean;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
