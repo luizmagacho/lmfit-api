@@ -8,6 +8,8 @@ import type { JwtUserPayload } from './jwt-user.payload';
 import { LoginDto } from './dto/login.dto';
 import { TenantId } from '../common/decorators/tenant-id.decorator';
 import { RefreshDto } from './dto/refresh.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 
 @ApiTags('auth')
@@ -26,6 +28,18 @@ export class AuthController {
   @Post('refresh')
   refresh(@Body() dto: RefreshDto) {
     return this.auth.refresh(dto.refreshToken);
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Post('forgot-password')
+  forgotPassword(@TenantId() tenantId: string, @Body() dto: ForgotPasswordDto) {
+    return this.auth.forgotPassword(tenantId, dto.email);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('reset-password')
+  resetPassword(@TenantId() tenantId: string, @Body() dto: ResetPasswordDto) {
+    return this.auth.resetPassword(tenantId, dto.token, dto.password);
   }
 
   @Post('logout')
