@@ -102,7 +102,14 @@ export class NotificationsService {
         </div>
       </div>
     `;
-    await resend.emails.send({ from, to, subject, text, html });
+    // O SDK da Resend NÃO lança exceção pra erros da própria API (chave inválida, domínio não
+    // verificado, remetente rejeitado etc.) — devolve `{ data, error }`. Sem checar `error` aqui,
+    // uma falha da Resend passaria batido como sucesso (só uma exception de rede/transporte cairia
+    // no catch de quem chama este método).
+    const { error } = await resend.emails.send({ from, to, subject, text, html });
+    if (error) {
+      throw new Error(`Resend rejected the email: ${error.message}`);
+    }
     this.log.log(`Password reset email sent to ${to}`);
   }
 }
