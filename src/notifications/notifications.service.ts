@@ -66,28 +66,38 @@ export class NotificationsService {
    * configurada, apenas loga e retorna (mesmo padrão de degradação graciosa de `sendEmail` sem
    * `SMTP_HOST`) — o token já foi criado e continua válido, só o e-mail não sai.
    */
-  async sendPasswordResetEmail(to: string, resetLink: string, tenantName: string): Promise<void> {
+  async sendPasswordResetEmail(
+    to: string,
+    resetLink: string,
+    tenantName: string,
+    branding?: { logoUrl?: string; primaryColor?: string },
+  ): Promise<void> {
     const resend = this.getResend();
     if (!resend) {
       this.log.warn('RESEND_API_KEY not set; skip password reset email');
       return;
     }
     const from = this.config.get<string>('RESEND_FROM_EMAIL') ?? 'Kivoni <onboarding@resend.dev>';
+    const accent = /^#[0-9a-fA-F]{6}$/.test(branding?.primaryColor ?? '') ? branding!.primaryColor! : '#7c3aed';
+    // A marca no topo é da LOJA (tenant), não da Kivoni — quem recebe reconhece a própria loja
+    // que administra. Sem `logoUrl` configurado, cai pro nome em texto (nunca um ícone genérico
+    // "K" que sugeriria ser da própria Kivoni, e nunca uma URL de imagem adivinhada que quebraria).
+    const logoBlock = branding?.logoUrl
+      ? `<img src="${branding.logoUrl}" alt="${tenantName}" width="120" style="max-width: 160px; max-height: 56px; width: auto; height: auto; display: inline-block;" />`
+      : `<span style="font-size: 20px; font-weight: 700; color: ${accent};">${tenantName}</span>`;
     const subject = `Redefinir senha — ${tenantName}`;
     const text = `Recebemos um pedido para redefinir a senha da sua conta em ${tenantName}.\n\nClique no link abaixo para criar uma nova senha (válido por 30 minutos):\n${resetLink}\n\nSe você não pediu isso, pode ignorar este e-mail — sua senha atual continua válida.`;
     const html = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 32px; background-color: #ffffff;">
         <div style="text-align: center; margin-bottom: 32px;">
-          <div style="display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 12px; background: linear-gradient(135deg, #7c3aed, #6d28d9);">
-            <span style="color: #ffffff; font-size: 22px; font-weight: 700; line-height: 48px;">K</span>
-          </div>
+          ${logoBlock}
         </div>
         <h1 style="font-size: 20px; font-weight: 700; color: #0f172a; text-align: center; margin: 0 0 8px;">Redefinir sua senha</h1>
         <p style="font-size: 14px; color: #64748b; text-align: center; margin: 0 0 32px; line-height: 1.6;">
           Recebemos um pedido para redefinir a senha da sua conta em <strong style="color: #334155;">${tenantName}</strong>.
         </p>
         <div style="text-align: center; margin-bottom: 24px;">
-          <a href="${resetLink}" style="display: inline-block; background-color: #7c3aed; color: #ffffff; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 28px; border-radius: 10px;">
+          <a href="${resetLink}" style="display: inline-block; background-color: ${accent}; color: #ffffff; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 28px; border-radius: 10px;">
             Criar nova senha
           </a>
         </div>
@@ -98,7 +108,7 @@ export class NotificationsService {
           Ou copie e cole no navegador:<br>${resetLink}
         </p>
         <div style="border-top: 1px solid #e2e8f0; padding-top: 20px; text-align: center;">
-          <p style="font-size: 11px; color: #cbd5e1; margin: 0;">Equipe Kivoni</p>
+          <p style="font-size: 11px; color: #cbd5e1; margin: 0;">Enviado via Kivoni em nome de ${tenantName}</p>
         </div>
       </div>
     `;

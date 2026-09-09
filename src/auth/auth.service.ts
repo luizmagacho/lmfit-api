@@ -76,7 +76,10 @@ export class AuthService {
     }
 
     try {
-      await this.notifications.sendPasswordResetEmail(user.email, link, tenant.name);
+      await this.notifications.sendPasswordResetEmail(user.email, link, tenant.name, {
+        logoUrl: tenant.branding?.logoUrl,
+        primaryColor: tenant.branding?.primaryColor,
+      });
     } catch (e) {
       // Mesmo racional do magic link: o token já foi criado e é válido mesmo se o envio falhar
       // (ex.: Resend fora do ar) — a criação do token é uma preocupação separada da entrega.
