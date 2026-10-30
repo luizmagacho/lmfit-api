@@ -1,10 +1,14 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 
-/** Canonical + legacy (`finance` / `ops` kept for existing DB rows; prefer `staff`). */
+/** Canonical + legacy (`finance` / `ops` kept for existing DB rows; prefer `staff`).
+ * `vendedor` is PDV-only: restricted by `@Roles` to the handful of endpoints the PDV screen
+ * needs (sale creation, product/customer lookup) — see orders/products/customers/locations/
+ * production controllers. */
 export type UserRole =
   | 'admin'
   | 'staff'
+  | 'vendedor'
   | 'wholesaler'
   | 'retail'
   | 'customer'
@@ -14,6 +18,7 @@ export type UserRole =
 export const USER_ROLE_VALUES = [
   'admin',
   'staff',
+  'vendedor',
   'wholesaler',
   'retail',
   'customer',

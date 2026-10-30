@@ -32,6 +32,7 @@ export class ProductionController {
   constructor(private readonly production: ProductionService) {}
 
   @Post('batches')
+  @Roles('admin', 'staff', 'vendedor')
   create(@TenantId() tenantId: string, @Body() dto: CreateProductionBatchDto) {
     return this.production.create(tenantId, dto);
   }

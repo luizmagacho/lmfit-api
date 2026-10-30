@@ -42,6 +42,7 @@ export class OrdersController {
 
   @Post()
   @Audited('orders.create')
+  @Roles('admin', 'staff', 'vendedor')
   create(
     @TenantId() tenantId: string,
     @Body() dto: CreateOrderDto,
@@ -57,6 +58,7 @@ export class OrdersController {
 
   @Post('sync-batch')
   @Audited('orders.sync-batch')
+  @Roles('admin', 'staff', 'vendedor')
   syncBatch(
     @TenantId() tenantId: string,
     @Body() dto: SyncBatchDto,

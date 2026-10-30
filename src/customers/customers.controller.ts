@@ -41,6 +41,7 @@ export class CustomersController {
 
   @Audited('customers.create')
   @Post()
+  @Roles('admin', 'staff', 'vendedor')
   create(
     @Body() dto: CreateCustomerDto,
     @CurrentUser() user: JwtUserPayload,
@@ -51,11 +52,13 @@ export class CustomersController {
 
   /** PDV: venda sem cadastro — retorna (criando se preciso) o "Consumidor Final" do tenant. */
   @Post('walk-in')
+  @Roles('admin', 'staff', 'vendedor')
   walkIn(@TenantId() tenantId: string) {
     return this.customers.getOrCreateWalkIn(tenantId);
   }
 
   @Get()
+  @Roles('admin', 'staff', 'vendedor')
   findAll(
     @Query() q: PaginationQueryDto,
     @TenantId() tenantId: string,
@@ -137,6 +140,7 @@ export class CustomersController {
 
   /** PDV: identifica o cliente escaneando a carteirinha dele (Loop 34). */
   @Get('by-code/:code')
+  @Roles('admin', 'staff', 'vendedor')
   async findByCode(
     @Param('code') code: string,
     @TenantId() tenantId: string,

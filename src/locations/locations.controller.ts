@@ -70,6 +70,7 @@ export class LocationsController {
   }
 
   @Get(':id/stock')
+  @Roles('admin', 'staff', 'vendedor')
   stockByLocation(
     @TenantId() tenantId: string,
     @Param('id') id: string,

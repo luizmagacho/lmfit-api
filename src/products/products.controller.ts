@@ -82,6 +82,7 @@ export class ProductsController {
   }
 
   @Get()
+  @Roles('admin', 'staff', 'vendedor')
   list(
     @Query() q: PaginationQueryDto,
     @TenantId() tenantId: string,
@@ -154,6 +155,7 @@ export class ProductsController {
 
   /** Busca exata por código de barras — usada pelo scanner de câmera no PDV. */
   @Get('barcode/:code')
+  @Roles('admin', 'staff', 'vendedor')
   getByBarcode(
     @Param('code') code: string,
     @TenantId() tenantId: string,
