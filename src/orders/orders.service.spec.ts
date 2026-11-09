@@ -13,6 +13,7 @@ import { PromotionsService } from '../promotions/promotions.service';
 import { PaymentsService } from '../payments/payments.service';
 import { Payment } from '../payments/schemas/payment.schema';
 import { Customer } from '../customers/schemas/customer.schema';
+import { User } from '../users/schemas/user.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CountersService } from '../common/counters/counters.service';
 
@@ -58,6 +59,7 @@ describe('OrdersService.create — wholesale re-validation on staff/PDV orders',
         { provide: PaymentsService, useValue: {} },
         { provide: getModelToken(Payment.name), useValue: {} },
         { provide: getModelToken(Customer.name), useValue: {} },
+        { provide: getModelToken(User.name), useValue: {} },
         { provide: NotificationsService, useValue: { sendEmail: jest.fn() } },
         { provide: CountersService, useValue: counters },
       ],
@@ -152,6 +154,7 @@ describe('OrdersService.findAll — search input is regex-escaped', () => {
         { provide: PaymentsService, useValue: {} },
         { provide: getModelToken(Payment.name), useValue: {} },
         { provide: getModelToken(Customer.name), useValue: {} },
+        { provide: getModelToken(User.name), useValue: {} },
         { provide: NotificationsService, useValue: { sendEmail: jest.fn() } },
         { provide: CountersService, useValue: { next: jest.fn().mockResolvedValue(1) } },
       ],
@@ -224,6 +227,7 @@ describe('OrdersService.update — shipped-notification idempotency (Loop 8, AC7
         { provide: getModelToken(ProductVariant.name), useValue: variantModel },
         { provide: getModelToken(Payment.name), useValue: {} },
         { provide: getModelToken(Customer.name), useValue: customerModel },
+        { provide: getModelToken(User.name), useValue: {} },
         { provide: ExcelSpreadsheetService, useValue: {} },
         { provide: ProductsService, useValue: products },
         { provide: PurchasesService, useValue: purchases },
@@ -326,6 +330,7 @@ describe('OrdersService.findAllForCustomer — real order tracking reaches /cont
         { provide: getModelToken(ProductVariant.name), useValue: {} },
         { provide: getModelToken(Payment.name), useValue: paymentModel },
         { provide: getModelToken(Customer.name), useValue: {} },
+        { provide: getModelToken(User.name), useValue: {} },
         { provide: ExcelSpreadsheetService, useValue: {} },
         { provide: ProductsService, useValue: {} },
         { provide: PurchasesService, useValue: {} },
@@ -464,6 +469,7 @@ describe('OrdersService.syncBatch — offline PDV sync (Loop PDV-OFF-4)', () => 
         { provide: PaymentsService, useValue: {} },
         { provide: getModelToken(Payment.name), useValue: {} },
         { provide: getModelToken(Customer.name), useValue: {} },
+        { provide: getModelToken(User.name), useValue: {} },
         { provide: NotificationsService, useValue: notifications },
         { provide: CountersService, useValue: counters },
       ],
@@ -690,6 +696,7 @@ describe('OrdersService — synced (clientSaleId) orders always reverse their ap
         { provide: PaymentsService, useValue: payments },
         { provide: getModelToken(Payment.name), useValue: {} },
         { provide: getModelToken(Customer.name), useValue: {} },
+        { provide: getModelToken(User.name), useValue: {} },
         { provide: NotificationsService, useValue: { sendEmail: jest.fn() } },
         { provide: CountersService, useValue: counters },
       ],

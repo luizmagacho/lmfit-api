@@ -11,6 +11,7 @@ import { PromotionsModule } from '../promotions/promotions.module';
 import { Order, OrderSchema } from './schemas/order.schema';
 import { Payment, PaymentSchema } from '../payments/schemas/payment.schema';
 import { Customer, CustomerSchema } from '../customers/schemas/customer.schema';
+import { User, UserSchema } from '../users/schemas/user.schema';
 import { PaymentsModule } from '../payments/payments.module';
 import { Counter, CounterSchema } from '../common/counters/counter.schema';
 import { CountersService } from '../common/counters/counters.service';
@@ -25,6 +26,7 @@ import { OrdersService } from './orders.service';
       { name: Payment.name, schema: PaymentSchema },
       { name: Customer.name, schema: CustomerSchema },
       { name: Counter.name, schema: CounterSchema },
+      { name: User.name, schema: UserSchema },
     ]),
     ProductsModule,
     PurchasesModule,

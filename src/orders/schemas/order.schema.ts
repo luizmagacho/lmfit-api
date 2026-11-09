@@ -104,6 +104,12 @@ export class Order {
   @Prop({ type: Types.ObjectId, ref: 'User' })
   createdBy?: Types.ObjectId;
 
+  /** Nome de `createdBy` no momento da venda — gravado junto (não é join/populate em cada
+   *  listagem) pra sobreviver a um usuário renomeado ou removido depois: o recibo/relatório de
+   *  "quem vendeu" continua mostrando o nome de quem realmente vendeu naquele instante. */
+  @Prop({ trim: true })
+  sellerName?: string;
+
   /** PDV: usuário que operou a venda. */
   @Prop({ type: Types.ObjectId, ref: 'User' })
   operatorUserId?: Types.ObjectId;

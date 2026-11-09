@@ -26,6 +26,7 @@ import type { OrderWarning } from './types/order-warning';
 import { PaymentsService } from '../payments/payments.service';
 import { Payment } from '../payments/schemas/payment.schema';
 import { Customer } from '../customers/schemas/customer.schema';
+import { User } from '../users/schemas/user.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { escapeRegex } from '../common/utils/text-search.util';
 import { CountersService } from '../common/counters/counters.service';
@@ -51,6 +52,8 @@ export class OrdersService {
     private readonly paymentModel: Model<Payment>,
     @InjectModel(Customer.name)
     private readonly customerModel: Model<Customer>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<User>,
     private readonly excel: ExcelSpreadsheetService,
     private readonly products: ProductsService,
     private readonly purchases: PurchasesService,
@@ -264,6 +267,19 @@ export class OrdersService {
     return { ...doc, warnings } as OrderResponse;
   }
 
+  /** Nome de quem fez a venda, pra gravar junto do pedido (ver comentário de `sellerName` no
+   *  schema) — `undefined` tanto pra pedido sem usuário autenticado (ex. import) quanto pro raro
+   *  caso de um id que não resolve mais pra um usuário de verdade. */
+  private async resolveSellerName(tenantId: string, userId?: string): Promise<string | undefined> {
+    if (!userId || !Types.ObjectId.isValid(userId)) return undefined;
+    const user = await this.userModel
+      .findOne({ _id: userId, tenantId: new Types.ObjectId(tenantId) })
+      .select('name')
+      .lean()
+      .exec();
+    return user?.name;
+  }
+
   async create(tenantId: string, dto: CreateOrderDto, createdBy?: string): Promise<OrderResponse> {
     const status = dto.status ?? 'open';
     const channel = dto.channel ?? 'online';
@@ -299,6 +315,7 @@ export class OrdersService {
     }
 
     const nextNumber = await this.counters.next(tenantId, 'order');
+    const sellerName = await this.resolveSellerName(tenantId, createdBy);
 
     const created = await this.model.create({
       tenantId: new Types.ObjectId(tenantId),
@@ -317,6 +334,7 @@ export class OrdersService {
       discountTotal,
       creditApplied,
       createdBy: createdBy ? new Types.ObjectId(createdBy) : undefined,
+      sellerName,
       operatorUserId:
         dto.operatorUserId && Types.ObjectId.isValid(dto.operatorUserId)
           ? new Types.ObjectId(dto.operatorUserId)
@@ -393,8 +411,11 @@ export class OrdersService {
       status: 'ok' | 'partial_backorder';
       downgradedLines?: Array<{ variantId: string; requested: number; fulfilled: number }>;
     }> = [];
+    // Resolvido uma vez só pro lote inteiro — todas as vendas de um sync-batch vêm do mesmo
+    // usuário logado no PDV, não precisa repetir a consulta a cada venda.
+    const sellerName = await this.resolveSellerName(tenantId, createdBy);
     for (const sale of sales) {
-      results.push(await this.syncOneOfflineSale(tenantId, locationId, sale, createdBy));
+      results.push(await this.syncOneOfflineSale(tenantId, locationId, sale, createdBy, sellerName));
     }
     return results;
   }
@@ -410,6 +431,7 @@ export class OrdersService {
       lines: OrderLineInputDto[];
     },
     createdBy?: string,
+    sellerName?: string,
   ): Promise<{
     clientSaleId: string;
     orderId: string;
@@ -483,6 +505,7 @@ export class OrdersService {
         locationId: locationId && Types.ObjectId.isValid(locationId) ? new Types.ObjectId(locationId) : undefined,
         clientSaleId: sale.clientSaleId,
         createdBy: createdBy ? new Types.ObjectId(createdBy) : undefined,
+        sellerName,
         autoBackorderedAt: downgradedLines.length ? new Date() : undefined,
         autoBackorderNote: downgradedLines.length
           ? `Sincronização converteu ${downgradedLines.length} linha(s) em encomenda por falta de estoque no local no momento do envio.`
